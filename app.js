@@ -448,19 +448,19 @@ function drawGridLines(context, padding, graphWidth, graphHeight, colors) {
 
     if (mark !== 0) {
       context.fillStyle = colors.ink;
-      context.font = "800 13px system-ui, sans-serif";
+      context.font = "800 10px system-ui, sans-serif";
       context.textAlign = "center";
       context.textBaseline = "top";
-      context.fillText(`${mark > 0 ? "+" : ""}${mark}`, x, padding + 8);
+      context.fillText(`${mark > 0 ? "+" : ""}${mark}`, x, padding + 6);
     }
   });
 
   context.setLineDash([]);
   context.fillStyle = colors.ink;
-  context.font = "900 14px system-ui, sans-serif";
+  context.font = "900 11px system-ui, sans-serif";
   context.textAlign = "center";
   context.textBaseline = "bottom";
-  context.fillText("OK", centsToX(0, padding, graphWidth), padding + graphHeight - 8);
+  context.fillText("OK", centsToX(0, padding, graphWidth), padding + graphHeight - 6);
 }
 
 function drawHistoryLine(context, padding, graphWidth, graphHeight, colors) {
@@ -518,12 +518,12 @@ function drawHistoryLine(context, padding, graphWidth, graphHeight, colors) {
     Math.abs(latest.point.cents) <= 5 ? colors.green : latest.point.cents > 0 ? colors.amber : colors.coral;
   context.strokeStyle = colors.ink;
   context.lineWidth = 4;
-  context.arc(latestX, latestY, 20, 0, Math.PI * 2);
+  context.arc(latestX, latestY, 17, 0, Math.PI * 2);
   context.fill();
   context.stroke();
 
   context.fillStyle = colors.ink;
-  context.font = "900 13px system-ui, sans-serif";
+  context.font = "900 11px system-ui, sans-serif";
   context.textAlign = "center";
   context.textBaseline = "middle";
   context.fillText(label, latestX, latestY);
