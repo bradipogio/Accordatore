@@ -60,6 +60,11 @@ const analysisConfig = {
   quietRms: 0.006,
   inputGain: 3.5,
   signalMeterFullScale: 0.08,
+  highPassHz: 30,
+  lowPassHz: 1600,
+  pitchHistorySize: 5,
+  pitchJumpResetCents: 150,
+  targetSwitchMarginCents: 12,
   holdMs: 3200,
   centsSmoothing: 0.22,
   frequencySmoothing: 0.3,
@@ -71,6 +76,8 @@ const state = {
   analyser: null,
   mediaStream: null,
   source: null,
+  highPass: null,
+  lowPass: null,
   inputGain: null,
   buffer: null,
   rafId: null,
@@ -78,6 +85,8 @@ const state = {
   lastSignalAt: 0,
   smoothedCents: null,
   smoothedFrequency: null,
+  lockedTarget: null,
+  pitchHistory: [],
   graphHistory: [],
   hasReading: false,
   listening: false,
@@ -121,9 +130,13 @@ async function toggleMicrophone() {
     state.mediaStream = await getMicrophoneStream();
 
     state.source = state.audioContext.createMediaStreamSource(state.mediaStream);
+    state.highPass = createFilter("highpass", analysisConfig.highPassHz);
+    state.lowPass = createFilter("lowpass", analysisConfig.lowPassHz);
     state.inputGain = state.audioContext.createGain();
     state.inputGain.gain.value = analysisConfig.inputGain;
-    state.source.connect(state.inputGain);
+    state.source.connect(state.highPass);
+    state.highPass.connect(state.lowPass);
+    state.lowPass.connect(state.inputGain);
     state.inputGain.connect(state.analyser);
     state.listening = true;
     elements.startButton.textContent = "Ferma microfono";
@@ -137,6 +150,14 @@ async function toggleMicrophone() {
         : "Microfono non disponibile in questo browser.";
     setStatus(message, "error");
   }
+}
+
+function createFilter(type, frequency) {
+  const filter = state.audioContext.createBiquadFilter();
+  filter.type = type;
+  filter.frequency.value = frequency;
+  filter.Q.value = 0.7;
+  return filter;
 }
 
 async function getMicrophoneStream() {
@@ -198,12 +219,12 @@ function analyze(timestamp) {
   }
 
   state.lastSignalAt = timestamp;
-  updateReadout(result.frequency);
+  updateReadout(stabilizeFrequency(result.frequency));
 }
 
 function updateReadout(frequency) {
   const referencePitch = Number(elements.referencePitch.value) || 440;
-  const target = findTargetNote(frequency, referencePitch);
+  const target = stabilizeTarget(frequency, referencePitch);
   const cents = 1200 * Math.log2(frequency / target.frequency);
   const clampedCents = clamp(cents, -50, 50);
   const displayCents = state.hasReading
@@ -252,6 +273,52 @@ function findTargetNote(frequency, referencePitch) {
   const name = `${noteNames[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`;
   const noteFrequency = referencePitch * 2 ** ((midi - 69) / 12);
   return { name, frequency: noteFrequency };
+}
+
+function stabilizeTarget(frequency, referencePitch) {
+  const candidate = findTargetNote(frequency, referencePitch);
+
+  if (!state.lockedTarget || state.lockedTarget.referencePitch !== referencePitch) {
+    state.lockedTarget = { ...candidate, referencePitch };
+    return candidate;
+  }
+
+  const lockedDistance = Math.abs(1200 * Math.log2(frequency / state.lockedTarget.frequency));
+  const candidateDistance = Math.abs(1200 * Math.log2(frequency / candidate.frequency));
+  const shouldSwitch =
+    candidate.name !== state.lockedTarget.name &&
+    candidateDistance + analysisConfig.targetSwitchMarginCents < lockedDistance;
+
+  if (shouldSwitch) {
+    state.lockedTarget = { ...candidate, referencePitch };
+  }
+
+  return state.lockedTarget;
+}
+
+function stabilizeFrequency(frequency) {
+  const lastFrequency = state.pitchHistory[state.pitchHistory.length - 1];
+  if (lastFrequency) {
+    const jumpCents = Math.abs(1200 * Math.log2(frequency / lastFrequency));
+    if (jumpCents > analysisConfig.pitchJumpResetCents) {
+      state.pitchHistory = [];
+    }
+  }
+
+  state.pitchHistory.push(frequency);
+
+  if (state.pitchHistory.length > analysisConfig.pitchHistorySize) {
+    state.pitchHistory.shift();
+  }
+
+  const sorted = [...state.pitchHistory].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+
+  if (sorted.length % 2) {
+    return sorted[middle];
+  }
+
+  return (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 function autoCorrelate(buffer, sampleRate) {
@@ -344,6 +411,8 @@ function autoCorrelate(buffer, sampleRate) {
 function refreshPresetUi() {
   renderStringList();
   clearDetectedString();
+  state.lockedTarget = null;
+  state.pitchHistory = [];
 }
 
 function renderStringList() {
@@ -707,6 +776,8 @@ function resetReadout() {
   state.lastSignalAt = 0;
   state.smoothedCents = null;
   state.smoothedFrequency = null;
+  state.lockedTarget = null;
+  state.pitchHistory = [];
   state.graphHistory = [];
   state.hasReading = false;
   elements.signalFill.style.width = "0%";
@@ -724,12 +795,22 @@ function stopListening() {
     state.source.disconnect();
   }
 
+  if (state.highPass) {
+    state.highPass.disconnect();
+  }
+
+  if (state.lowPass) {
+    state.lowPass.disconnect();
+  }
+
   if (state.inputGain) {
     state.inputGain.disconnect();
   }
 
   state.mediaStream = null;
   state.source = null;
+  state.highPass = null;
+  state.lowPass = null;
   state.inputGain = null;
   state.listening = false;
   elements.startButton.textContent = "Avvia microfono";
