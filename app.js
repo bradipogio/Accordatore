@@ -39,6 +39,7 @@ const tunings = {
 const elements = {
   startButton: document.querySelector("#startButton"),
   tuningSelect: document.querySelector("#tuningSelect"),
+  skinSelect: document.querySelector("#skinSelect"),
   referencePitch: document.querySelector("#referencePitch"),
   statusDot: document.querySelector("#statusDot"),
   statusText: document.querySelector("#statusText"),
@@ -90,10 +91,14 @@ const graph = {
 
 setupGraphCanvas();
 refreshPresetUi();
+restoreTheme();
 registerServiceWorker();
 
 elements.startButton.addEventListener("click", toggleMicrophone);
 elements.tuningSelect.addEventListener("change", refreshPresetUi);
+elements.skinSelect.addEventListener("change", () => {
+  applyTheme(elements.skinSelect.value);
+});
 elements.referencePitch.addEventListener("change", () => {
   normalizeReferencePitch();
   refreshPresetUi();
@@ -591,11 +596,46 @@ function getCanvasColors() {
     coral: styles.getPropertyValue("--coral").trim() || "#ff5a4f",
     green: styles.getPropertyValue("--green").trim() || "#2ee66b",
     greenSoft: "rgba(46, 230, 107, 0.22)",
-    grid: "rgba(17, 17, 17, 0.22)",
+    grid: styles.getPropertyValue("--grid").trim() || "rgba(17, 17, 17, 0.22)",
     ink: styles.getPropertyValue("--ink").trim() || "#111111",
     paper: styles.getPropertyValue("--panel").trim() || "#ffffff",
     pink: styles.getPropertyValue("--pink").trim() || "#ff7ac8",
   };
+}
+
+function restoreTheme() {
+  const savedTheme = readSavedTheme();
+  elements.skinSelect.value = ["brutal", "neon", "pixel"].includes(savedTheme) ? savedTheme : "brutal";
+  applyTheme(elements.skinSelect.value);
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const themeColor = {
+    brutal: "#ffe94f",
+    neon: "#09080f",
+    pixel: "#b7f7d0",
+  }[theme] || "#ffe94f";
+
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", themeColor);
+  saveTheme(theme);
+  drawGraph();
+}
+
+function readSavedTheme() {
+  try {
+    return localStorage.getItem("accordatore-theme") || "brutal";
+  } catch (error) {
+    return "brutal";
+  }
+}
+
+function saveTheme(theme) {
+  try {
+    localStorage.setItem("accordatore-theme", theme);
+  } catch (error) {
+    // Theme changes can still work for the current session.
+  }
 }
 
 function updateSignalMeter(rms) {
