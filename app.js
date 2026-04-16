@@ -53,8 +53,12 @@ const elements = {
 
 const analysisConfig = {
   updateIntervalMs: 70,
-  minRms: 0.0045,
-  minClarity: 0.27,
+  minRms: 0.0016,
+  minClarity: 0.22,
+  quietMinClarity: 0.36,
+  quietRms: 0.006,
+  inputGain: 3.5,
+  signalMeterFullScale: 0.08,
   holdMs: 3200,
   centsSmoothing: 0.22,
   frequencySmoothing: 0.3,
@@ -66,6 +70,7 @@ const state = {
   analyser: null,
   mediaStream: null,
   source: null,
+  inputGain: null,
   buffer: null,
   rafId: null,
   lastUpdate: 0,
@@ -85,6 +90,7 @@ const graph = {
 
 setupGraphCanvas();
 refreshPresetUi();
+registerServiceWorker();
 
 elements.startButton.addEventListener("click", toggleMicrophone);
 elements.tuningSelect.addEventListener("change", refreshPresetUi);
@@ -107,16 +113,13 @@ async function toggleMicrophone() {
     setStatus("Richiesta accesso al microfono...", "idle");
     await ensureAudioContext();
 
-    state.mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
-    });
+    state.mediaStream = await getMicrophoneStream();
 
     state.source = state.audioContext.createMediaStreamSource(state.mediaStream);
-    state.source.connect(state.analyser);
+    state.inputGain = state.audioContext.createGain();
+    state.inputGain.gain.value = analysisConfig.inputGain;
+    state.source.connect(state.inputGain);
+    state.inputGain.connect(state.analyser);
     state.listening = true;
     elements.startButton.textContent = "Ferma microfono";
     setStatus("Microfono attivo.", "live");
@@ -131,12 +134,31 @@ async function toggleMicrophone() {
   }
 }
 
+async function getMicrophoneStream() {
+  const audioConstraints = {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: true,
+    channelCount: 1,
+  };
+
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+  } catch (error) {
+    if (error.name === "OverconstrainedError" || error.name === "ConstraintNotSatisfiedError") {
+      return navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+
+    throw error;
+  }
+}
+
 async function ensureAudioContext() {
   if (!state.audioContext) {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     state.audioContext = new AudioContext();
     state.analyser = state.audioContext.createAnalyser();
-    state.analyser.fftSize = 4096;
+    state.analyser.fftSize = 8192;
     state.analyser.smoothingTimeConstant = 0;
     state.buffer = new Float32Array(state.analyser.fftSize);
   }
@@ -287,12 +309,15 @@ function autoCorrelate(buffer, sampleRate) {
     }
   }
 
-  if (bestLag <= 0 || bestCorrelation < 0.01) {
+  if (bestLag <= 0 || correlations[0] <= 0) {
     return { frequency: null, rms, clarity: 0 };
   }
 
   const clarity = bestCorrelation / correlations[0];
-  if (clarity < analysisConfig.minClarity) {
+  const minClarity =
+    rms < analysisConfig.quietRms ? analysisConfig.quietMinClarity : analysisConfig.minClarity;
+
+  if (clarity < minClarity) {
     return { frequency: null, rms, clarity };
   }
 
@@ -574,7 +599,7 @@ function getCanvasColors() {
 }
 
 function updateSignalMeter(rms) {
-  const level = clamp((rms / 0.045) * 100, 0, 100);
+  const level = clamp((rms / analysisConfig.signalMeterFullScale) * 100, 0, 100);
   elements.signalFill.style.width = `${level}%`;
 
   if (rms < analysisConfig.minRms) {
@@ -659,8 +684,13 @@ function stopListening() {
     state.source.disconnect();
   }
 
+  if (state.inputGain) {
+    state.inputGain.disconnect();
+  }
+
   state.mediaStream = null;
   state.source = null;
+  state.inputGain = null;
   state.listening = false;
   elements.startButton.textContent = "Avvia microfono";
 
@@ -677,4 +707,16 @@ function setStatus(message, type) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {
+      // Standalone mode still works without offline caching.
+    });
+  });
 }

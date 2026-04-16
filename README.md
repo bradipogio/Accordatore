@@ -14,6 +14,20 @@ Poi visita `http://localhost:5173`.
 
 Il microfono richiede un contesto sicuro: `localhost` è supportato dai browser moderni. Se apri direttamente `index.html`, alcuni browser potrebbero bloccare l'accesso al microfono.
 
+## iPhone
+
+La webapp include manifest, icona Home, meta Apple per apertura standalone e service worker.
+
+Per salvarla come app:
+
+1. Aprila da Safari.
+2. Usa Condividi.
+3. Scegli Aggiungi alla schermata Home.
+
+Se l'avevi gia salvata prima di questi file, rimuovi l'icona vecchia e aggiungila di nuovo. iOS mantiene le impostazioni del collegamento creato in precedenza.
+
+Su iPhone il microfono funziona correttamente solo da un contesto sicuro, quindi in produzione usa HTTPS.
+
 ## Funzioni
 
 - Rilevamento frequenza in tempo reale con Web Audio API.

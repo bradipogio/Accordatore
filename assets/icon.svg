@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-label="Accordatore">
+  <rect width="180" height="180" rx="28" fill="#ffe94f"/>
+  <rect x="18" y="18" width="144" height="144" rx="18" fill="#ffffff" stroke="#111111" stroke-width="8"/>
+  <path d="M90 42v96" stroke="#2ee66b" stroke-width="10" stroke-linecap="round"/>
+  <path d="M50 90h80" stroke="#111111" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="112" cy="90" r="22" fill="#ff7ac8" stroke="#111111" stroke-width="7"/>
+  <path d="M55 132c16-16 54-16 70 0" fill="none" stroke="#111111" stroke-width="7" stroke-linecap="round"/>
+</svg>
