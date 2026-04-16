@@ -119,7 +119,7 @@ async function toggleMicrophone() {
     state.source.connect(state.analyser);
     state.listening = true;
     elements.startButton.textContent = "Ferma microfono";
-    setStatus("Microfono attivo. Suona una corda singola.", "live");
+    setStatus("Microfono attivo.", "live");
     scheduleAnalysis();
   } catch (error) {
     stopListening();
@@ -423,6 +423,7 @@ function drawGraph() {
 
   drawTunedBand(context, padding, graphWidth, graphHeight, colors);
   drawGridLines(context, padding, graphWidth, graphHeight, colors);
+  drawCursorGuide(context, padding, graphWidth, graphHeight, colors);
   drawHistoryLine(context, padding, graphWidth, graphHeight, colors);
 }
 
@@ -463,30 +464,44 @@ function drawGridLines(context, padding, graphWidth, graphHeight, colors) {
   context.fillText("OK", centsToX(0, padding, graphWidth), padding + graphHeight - 6);
 }
 
+function drawCursorGuide(context, padding, graphWidth, graphHeight, colors) {
+  const y = getCursorY(padding, graphHeight);
+
+  context.setLineDash([]);
+  context.beginPath();
+  context.lineWidth = 3;
+  context.strokeStyle = colors.pink;
+  context.moveTo(padding, y);
+  context.lineTo(padding + graphWidth, y);
+  context.stroke();
+}
+
 function drawHistoryLine(context, padding, graphWidth, graphHeight, colors) {
   const history = state.graphHistory;
 
   if (!history.length) {
-    context.fillStyle = colors.ink;
-    context.font = "900 22px system-ui, sans-serif";
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText("Suona una corda", padding + graphWidth / 2, padding + graphHeight / 2);
     return;
   }
 
-  const spacing = graphHeight / Math.max(analysisConfig.maxHistoryPoints - 1, 1);
+  const cursorY = getCursorY(padding, graphHeight);
+  const spacing = (graphHeight / 2) / Math.max(analysisConfig.maxHistoryPoints - 1, 1);
   let drawing = false;
 
   context.beginPath();
   history.forEach((point, index) => {
+    const y = cursorY + spacing * (history.length - 1 - index);
+
+    if (y > padding + graphHeight) {
+      drawing = false;
+      return;
+    }
+
     if (!point) {
       drawing = false;
       return;
     }
 
     const x = centsToX(point.cents, padding, graphWidth);
-    const y = padding + graphHeight - spacing * (history.length - 1 - index);
 
     if (!drawing) {
       context.moveTo(x, y);
@@ -503,19 +518,18 @@ function drawHistoryLine(context, padding, graphWidth, graphHeight, colors) {
   context.strokeStyle = colors.ink;
   context.stroke();
 
-  const latest = findLatestGraphPoint();
-  if (!latest) {
+  const current = history[history.length - 1];
+  if (!current) {
     return;
   }
 
-  const latestIndex = latest.index;
-  const latestX = centsToX(latest.point.cents, padding, graphWidth);
-  const latestY = padding + graphHeight - spacing * (history.length - 1 - latestIndex);
-  const label = formatCentsLabel(latest.point.cents);
+  const latestX = centsToX(current.cents, padding, graphWidth);
+  const latestY = cursorY;
+  const label = formatCentsLabel(current.cents);
 
   context.beginPath();
   context.fillStyle =
-    Math.abs(latest.point.cents) <= 5 ? colors.green : latest.point.cents > 0 ? colors.amber : colors.coral;
+    Math.abs(current.cents) <= 5 ? colors.green : current.cents > 0 ? colors.amber : colors.coral;
   context.strokeStyle = colors.ink;
   context.lineWidth = 4;
   context.arc(latestX, latestY, 17, 0, Math.PI * 2);
@@ -533,14 +547,8 @@ function centsToX(cents, padding, graphWidth) {
   return padding + ((cents + 50) / 100) * graphWidth;
 }
 
-function findLatestGraphPoint() {
-  for (let index = state.graphHistory.length - 1; index >= 0; index -= 1) {
-    if (state.graphHistory[index]) {
-      return { index, point: state.graphHistory[index] };
-    }
-  }
-
-  return null;
+function getCursorY(padding, graphHeight) {
+  return padding + graphHeight / 2;
 }
 
 function formatCentsLabel(cents) {
@@ -560,6 +568,7 @@ function getCanvasColors() {
     greenSoft: "rgba(46, 230, 107, 0.22)",
     ink: styles.getPropertyValue("--ink").trim() || "#111111",
     paper: styles.getPropertyValue("--panel").trim() || "#ffffff",
+    pink: styles.getPropertyValue("--pink").trim() || "#ff7ac8",
   };
 }
 

@@ -245,8 +245,7 @@ button:focus-visible {
   min-width: 0;
 }
 
-.graph-labels,
-.graph-axis {
+.graph-labels {
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -259,8 +258,7 @@ button:focus-visible {
   text-align: center;
 }
 
-.graph-labels span:last-child,
-.graph-axis span:last-child {
+.graph-labels span:last-child {
   text-align: right;
 }
 
