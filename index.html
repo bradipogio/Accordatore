@@ -23,7 +23,7 @@
 
         <div class="controls-strip" aria-label="Controlli accordatore">
           <label class="control-field" for="tuningSelect">
-            Strumento
+            <span>Strumento</span>
             <select id="tuningSelect">
               <option value="chromatic">Cromatico</option>
               <option value="guitar" selected>Chitarra</option>
@@ -32,7 +32,7 @@
             </select>
           </label>
           <label class="control-field" for="referencePitch">
-            La centrale
+            <span>La</span>
             <input
               id="referencePitch"
               type="number"
@@ -45,12 +45,9 @@
           </label>
         </div>
 
-        <div class="status-line" role="status" aria-live="polite">
-          <span id="statusDot" class="status-dot"></span>
-          <span id="statusText">Pronto. Concedi il microfono per iniziare.</span>
-        </div>
-
         <div class="signal-row" aria-label="Livello del segnale">
+          <span id="statusDot" class="status-dot"></span>
+          <strong id="statusText">Pronto</strong>
           <span>Volume</span>
           <div class="signal-meter" aria-hidden="true">
             <div id="signalFill" class="signal-fill"></div>

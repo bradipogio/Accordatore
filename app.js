@@ -441,8 +441,8 @@ function drawGridLines(context, padding, graphWidth, graphHeight, colors) {
     const x = centsToX(mark, padding, graphWidth);
     context.beginPath();
     context.lineWidth = mark === 0 ? 4 : 2;
-    context.strokeStyle = mark === 0 ? colors.green : colors.ink;
-    context.setLineDash(mark === 0 ? [] : [8, 8]);
+    context.strokeStyle = mark === 0 ? colors.green : colors.grid;
+    context.setLineDash([]);
     context.moveTo(x, padding);
     context.lineTo(x, padding + graphHeight);
     context.stroke();
@@ -566,6 +566,7 @@ function getCanvasColors() {
     coral: styles.getPropertyValue("--coral").trim() || "#ff5a4f",
     green: styles.getPropertyValue("--green").trim() || "#2ee66b",
     greenSoft: "rgba(46, 230, 107, 0.22)",
+    grid: "rgba(17, 17, 17, 0.22)",
     ink: styles.getPropertyValue("--ink").trim() || "#111111",
     paper: styles.getPropertyValue("--panel").trim() || "#ffffff",
     pink: styles.getPropertyValue("--pink").trim() || "#ff7ac8",
