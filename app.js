@@ -38,17 +38,27 @@ const tunings = {
 
 const elements = {
   startButton: document.querySelector("#startButton"),
-  testToneButton: document.querySelector("#testToneButton"),
   tuningSelect: document.querySelector("#tuningSelect"),
   referencePitch: document.querySelector("#referencePitch"),
   statusDot: document.querySelector("#statusDot"),
   statusText: document.querySelector("#statusText"),
-  needle: document.querySelector("#needle"),
+  signalFill: document.querySelector("#signalFill"),
+  signalText: document.querySelector("#signalText"),
+  intonationCanvas: document.querySelector("#intonationCanvas"),
   noteName: document.querySelector("#noteName"),
-  centsValue: document.querySelector("#centsValue"),
   frequencyValue: document.querySelector("#frequencyValue"),
   tuningMessage: document.querySelector("#tuningMessage"),
   stringList: document.querySelector("#stringList"),
+};
+
+const analysisConfig = {
+  updateIntervalMs: 70,
+  minRms: 0.0045,
+  minClarity: 0.27,
+  holdMs: 3200,
+  centsSmoothing: 0.22,
+  frequencySmoothing: 0.3,
+  maxHistoryPoints: 96,
 };
 
 const state = {
@@ -56,19 +66,27 @@ const state = {
   analyser: null,
   mediaStream: null,
   source: null,
-  oscillator: null,
-  gain: null,
   buffer: null,
   rafId: null,
   lastUpdate: 0,
+  lastSignalAt: 0,
+  smoothedCents: null,
+  smoothedFrequency: null,
+  graphHistory: [],
+  hasReading: false,
   listening: false,
-  testToneOn: false,
 };
 
+const graph = {
+  context: elements.intonationCanvas.getContext("2d"),
+  pixelRatio: 1,
+  resizeObserver: null,
+};
+
+setupGraphCanvas();
 refreshPresetUi();
 
 elements.startButton.addEventListener("click", toggleMicrophone);
-elements.testToneButton.addEventListener("click", toggleTestTone);
 elements.tuningSelect.addEventListener("change", refreshPresetUi);
 elements.referencePitch.addEventListener("change", () => {
   normalizeReferencePitch();
@@ -88,7 +106,6 @@ async function toggleMicrophone() {
 
     setStatus("Richiesta accesso al microfono...", "idle");
     await ensureAudioContext();
-    stopTestTone();
 
     state.mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -114,37 +131,6 @@ async function toggleMicrophone() {
   }
 }
 
-async function toggleTestTone() {
-  try {
-    await ensureAudioContext();
-  } catch (error) {
-    setStatus("Audio non disponibile in questo browser.", "error");
-    return;
-  }
-
-  if (state.testToneOn) {
-    stopTestTone();
-    return;
-  }
-
-  stopListening();
-
-  state.oscillator = state.audioContext.createOscillator();
-  state.gain = state.audioContext.createGain();
-  const testNote = getTestNote();
-  state.oscillator.type = "sine";
-  state.oscillator.frequency.value = testNote.frequency;
-  state.gain.gain.value = 0.08;
-  state.oscillator.connect(state.gain);
-  state.gain.connect(state.audioContext.destination);
-  state.gain.connect(state.analyser);
-  state.oscillator.start();
-  state.testToneOn = true;
-  elements.testToneButton.textContent = `Ferma ${testNote.name}`;
-  setStatus("Tono di prova attivo.", "live");
-  scheduleAnalysis();
-}
-
 async function ensureAudioContext() {
   if (!state.audioContext) {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -168,20 +154,24 @@ function scheduleAnalysis() {
 function analyze(timestamp) {
   state.rafId = requestAnimationFrame(analyze);
 
-  if (timestamp - state.lastUpdate < 45) {
+  if (timestamp - state.lastUpdate < analysisConfig.updateIntervalMs) {
     return;
   }
 
   state.lastUpdate = timestamp;
   state.analyser.getFloatTimeDomainData(state.buffer);
 
-  const frequency = autoCorrelate(state.buffer, state.audioContext.sampleRate);
-  if (!frequency) {
-    showIdleReadout("Segnale troppo basso");
+  const result = autoCorrelate(state.buffer, state.audioContext.sampleRate);
+  updateSignalMeter(result.rms);
+
+  if (!result.frequency) {
+    pushGraphPoint(null);
+    holdLastReadout(timestamp, result.rms);
     return;
   }
 
-  updateReadout(frequency);
+  state.lastSignalAt = timestamp;
+  updateReadout(result.frequency);
 }
 
 function updateReadout(frequency) {
@@ -189,25 +179,31 @@ function updateReadout(frequency) {
   const target = findTargetNote(frequency, referencePitch);
   const cents = 1200 * Math.log2(frequency / target.frequency);
   const clampedCents = clamp(cents, -50, 50);
-  const rotation = (clampedCents / 50) * 58;
+  const displayCents = state.hasReading
+    ? state.smoothedCents + (clampedCents - state.smoothedCents) * analysisConfig.centsSmoothing
+    : clampedCents;
+  const displayFrequency = state.smoothedFrequency
+    ? state.smoothedFrequency + (frequency - state.smoothedFrequency) * analysisConfig.frequencySmoothing
+    : frequency;
 
-  elements.needle.style.transform = `translateX(-50%) rotate(${rotation}deg)`;
   elements.noteName.textContent = target.name;
-  elements.frequencyValue.textContent = `${frequency.toFixed(1)} Hz`;
+  elements.frequencyValue.textContent = `${displayFrequency.toFixed(1)} Hz`;
+  state.smoothedCents = displayCents;
+  state.smoothedFrequency = displayFrequency;
+  state.hasReading = true;
+  pushGraphPoint({ cents: displayCents });
+  highlightDetectedString(target.name);
 
   const absoluteCents = Math.abs(cents);
   elements.tuningMessage.classList.remove("is-flat", "is-sharp", "is-tuned");
 
   if (absoluteCents <= 5) {
-    elements.centsValue.textContent = "Intonata";
     elements.tuningMessage.textContent = "Accordata";
     elements.tuningMessage.classList.add("is-tuned");
   } else if (cents < 0) {
-    elements.centsValue.textContent = `${Math.round(Math.abs(cents))} cent sotto`;
     elements.tuningMessage.textContent = "Tendi la corda";
     elements.tuningMessage.classList.add("is-flat");
   } else {
-    elements.centsValue.textContent = `${Math.round(cents)} cent sopra`;
     elements.tuningMessage.textContent = "Allenta la corda";
     elements.tuningMessage.classList.add("is-sharp");
   }
@@ -240,8 +236,8 @@ function autoCorrelate(buffer, sampleRate) {
   }
 
   rms = Math.sqrt(rms / size);
-  if (rms < 0.012) {
-    return null;
+  if (rms < analysisConfig.minRms) {
+    return { frequency: null, rms, clarity: 0 };
   }
 
   let start = 0;
@@ -292,7 +288,12 @@ function autoCorrelate(buffer, sampleRate) {
   }
 
   if (bestLag <= 0 || bestCorrelation < 0.01) {
-    return null;
+    return { frequency: null, rms, clarity: 0 };
+  }
+
+  const clarity = bestCorrelation / correlations[0];
+  if (clarity < analysisConfig.minClarity) {
+    return { frequency: null, rms, clarity };
   }
 
   const previous = correlations[bestLag - 1] || 0;
@@ -304,19 +305,15 @@ function autoCorrelate(buffer, sampleRate) {
   const pitch = sampleRate / refinedLag;
 
   if (!Number.isFinite(pitch) || pitch < 40 || pitch > 1200) {
-    return null;
+    return { frequency: null, rms, clarity };
   }
 
-  return pitch;
+  return { frequency: pitch, rms, clarity };
 }
 
 function refreshPresetUi() {
   renderStringList();
-  updateTestToneButton();
-
-  if (state.oscillator) {
-    state.oscillator.frequency.value = getTestNote().frequency;
-  }
+  clearDetectedString();
 }
 
 function renderStringList() {
@@ -339,6 +336,7 @@ function renderStringList() {
   notes.forEach((note) => {
     const pill = document.createElement("div");
     pill.className = "string-pill";
+    pill.dataset.note = note.name;
 
     const name = document.createElement("strong");
     name.textContent = note.name;
@@ -359,25 +357,6 @@ function getScaledPresetNotes(notes, referencePitch) {
   }));
 }
 
-function getTestNote() {
-  const selectedTuning = tunings[elements.tuningSelect.value];
-  const referencePitch = getReferencePitch();
-
-  if (!selectedTuning.notes.length) {
-    return { name: `La ${referencePitch}`, frequency: referencePitch };
-  }
-
-  const scaledNotes = getScaledPresetNotes(selectedTuning.notes, referencePitch);
-  return scaledNotes.find((note) => note.name.startsWith("A")) || scaledNotes[0];
-}
-
-function updateTestToneButton() {
-  const testNote = getTestNote();
-  elements.testToneButton.textContent = state.testToneOn
-    ? `Ferma ${testNote.name}`
-    : `Prova ${testNote.name}`;
-}
-
 function normalizeReferencePitch() {
   const value = Number(elements.referencePitch.value);
   if (!Number.isFinite(value) || value < 400 || value > 480) {
@@ -389,13 +368,276 @@ function getReferencePitch() {
   return Number(elements.referencePitch.value) || 440;
 }
 
-function showIdleReadout(message) {
-  elements.needle.style.transform = "translateX(-50%) rotate(0deg)";
-  elements.noteName.textContent = "--";
-  elements.centsValue.textContent = message;
-  elements.frequencyValue.textContent = "-- Hz";
-  elements.tuningMessage.textContent = "Suona una corda singola";
+function setupGraphCanvas() {
+  resizeGraphCanvas();
+  drawGraph();
+
+  if ("ResizeObserver" in window) {
+    graph.resizeObserver = new ResizeObserver(() => {
+      resizeGraphCanvas();
+      drawGraph();
+    });
+    graph.resizeObserver.observe(elements.intonationCanvas);
+    return;
+  }
+
+  window.addEventListener("resize", () => {
+    resizeGraphCanvas();
+    drawGraph();
+  });
+}
+
+function resizeGraphCanvas() {
+  const rect = elements.intonationCanvas.getBoundingClientRect();
+  const width = Math.max(320, Math.round(rect.width));
+  const height = Math.max(240, Math.round(rect.height));
+  graph.pixelRatio = window.devicePixelRatio || 1;
+  elements.intonationCanvas.width = Math.round(width * graph.pixelRatio);
+  elements.intonationCanvas.height = Math.round(height * graph.pixelRatio);
+  graph.context.setTransform(graph.pixelRatio, 0, 0, graph.pixelRatio, 0, 0);
+}
+
+function pushGraphPoint(cents) {
+  state.graphHistory.push(cents ? { cents: clamp(cents.cents, -50, 50) } : null);
+
+  if (state.graphHistory.length > analysisConfig.maxHistoryPoints) {
+    state.graphHistory.shift();
+  }
+
+  drawGraph();
+}
+
+function drawGraph() {
+  const canvas = elements.intonationCanvas;
+  const context = graph.context;
+  const width = canvas.width / graph.pixelRatio;
+  const height = canvas.height / graph.pixelRatio;
+  const padding = 24;
+  const graphWidth = width - padding * 2;
+  const graphHeight = height - padding * 2;
+  const colors = getCanvasColors();
+
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = colors.paper;
+  context.fillRect(0, 0, width, height);
+
+  drawTunedBand(context, padding, graphWidth, graphHeight, colors);
+  drawGridLines(context, padding, graphWidth, graphHeight, colors);
+  drawHistoryLine(context, padding, graphWidth, graphHeight, colors);
+}
+
+function drawTunedBand(context, padding, graphWidth, graphHeight, colors) {
+  const centerX = centsToX(0, padding, graphWidth);
+  const bandHalfWidth = (5 / 50) * (graphWidth / 2);
+  context.fillStyle = colors.greenSoft;
+  context.fillRect(centerX - bandHalfWidth, padding, bandHalfWidth * 2, graphHeight);
+}
+
+function drawGridLines(context, padding, graphWidth, graphHeight, colors) {
+  const marks = [-50, -25, 0, 25, 50];
+
+  marks.forEach((mark) => {
+    const x = centsToX(mark, padding, graphWidth);
+    context.beginPath();
+    context.lineWidth = mark === 0 ? 4 : 2;
+    context.strokeStyle = mark === 0 ? colors.green : colors.ink;
+    context.setLineDash(mark === 0 ? [] : [8, 8]);
+    context.moveTo(x, padding);
+    context.lineTo(x, padding + graphHeight);
+    context.stroke();
+
+    if (mark !== 0) {
+      context.fillStyle = colors.ink;
+      context.font = "800 13px system-ui, sans-serif";
+      context.textAlign = "center";
+      context.textBaseline = "top";
+      context.fillText(`${mark > 0 ? "+" : ""}${mark}`, x, padding + 8);
+    }
+  });
+
+  context.setLineDash([]);
+  context.fillStyle = colors.ink;
+  context.font = "900 14px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "bottom";
+  context.fillText("OK", centsToX(0, padding, graphWidth), padding + graphHeight - 8);
+}
+
+function drawHistoryLine(context, padding, graphWidth, graphHeight, colors) {
+  const history = state.graphHistory;
+
+  if (!history.length) {
+    context.fillStyle = colors.ink;
+    context.font = "900 22px system-ui, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("Suona una corda", padding + graphWidth / 2, padding + graphHeight / 2);
+    return;
+  }
+
+  const spacing = graphHeight / Math.max(analysisConfig.maxHistoryPoints - 1, 1);
+  let drawing = false;
+
+  context.beginPath();
+  history.forEach((point, index) => {
+    if (!point) {
+      drawing = false;
+      return;
+    }
+
+    const x = centsToX(point.cents, padding, graphWidth);
+    const y = padding + graphHeight - spacing * (history.length - 1 - index);
+
+    if (!drawing) {
+      context.moveTo(x, y);
+      drawing = true;
+    } else {
+      context.lineTo(x, y);
+    }
+  });
+
+  context.setLineDash([]);
+  context.lineWidth = 5;
+  context.lineJoin = "round";
+  context.lineCap = "round";
+  context.strokeStyle = colors.ink;
+  context.stroke();
+
+  const latest = findLatestGraphPoint();
+  if (!latest) {
+    return;
+  }
+
+  const latestIndex = latest.index;
+  const latestX = centsToX(latest.point.cents, padding, graphWidth);
+  const latestY = padding + graphHeight - spacing * (history.length - 1 - latestIndex);
+  const label = formatCentsLabel(latest.point.cents);
+
+  context.beginPath();
+  context.fillStyle =
+    Math.abs(latest.point.cents) <= 5 ? colors.green : latest.point.cents > 0 ? colors.amber : colors.coral;
+  context.strokeStyle = colors.ink;
+  context.lineWidth = 4;
+  context.arc(latestX, latestY, 20, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+
+  context.fillStyle = colors.ink;
+  context.font = "900 13px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(label, latestX, latestY);
+}
+
+function centsToX(cents, padding, graphWidth) {
+  return padding + ((cents + 50) / 100) * graphWidth;
+}
+
+function findLatestGraphPoint() {
+  for (let index = state.graphHistory.length - 1; index >= 0; index -= 1) {
+    if (state.graphHistory[index]) {
+      return { index, point: state.graphHistory[index] };
+    }
+  }
+
+  return null;
+}
+
+function formatCentsLabel(cents) {
+  if (Math.abs(cents) <= 5) {
+    return "0";
+  }
+
+  return `${cents > 0 ? "+" : ""}${Math.round(cents)}`;
+}
+
+function getCanvasColors() {
+  const styles = getComputedStyle(document.documentElement);
+  return {
+    amber: styles.getPropertyValue("--amber").trim() || "#ffb800",
+    coral: styles.getPropertyValue("--coral").trim() || "#ff5a4f",
+    green: styles.getPropertyValue("--green").trim() || "#2ee66b",
+    greenSoft: "rgba(46, 230, 107, 0.22)",
+    ink: styles.getPropertyValue("--ink").trim() || "#111111",
+    paper: styles.getPropertyValue("--panel").trim() || "#ffffff",
+  };
+}
+
+function updateSignalMeter(rms) {
+  const level = clamp((rms / 0.045) * 100, 0, 100);
+  elements.signalFill.style.width = `${level}%`;
+
+  if (rms < analysisConfig.minRms) {
+    elements.signalText.textContent = state.hasReading ? "Ultima lettura" : "Basso";
+    return;
+  }
+
+  if (level > 78) {
+    elements.signalText.textContent = "Forte";
+  } else if (level > 28) {
+    elements.signalText.textContent = "Buono";
+  } else {
+    elements.signalText.textContent = "Debole";
+  }
+}
+
+function highlightDetectedString(noteName) {
+  const noteBase = getNoteBase(noteName);
+  const pills = elements.stringList.querySelectorAll(".string-pill");
+  const hasExactMatch = Array.from(pills).some((pill) => pill.dataset.note === noteName);
+
+  pills.forEach((pill) => {
+    const matches = hasExactMatch ? pill.dataset.note === noteName : getNoteBase(pill.dataset.note || "") === noteBase;
+    pill.classList.toggle("is-detected", matches);
+  });
+}
+
+function clearDetectedString() {
+  elements.stringList
+    .querySelectorAll(".string-pill.is-detected")
+    .forEach((pill) => pill.classList.remove("is-detected"));
+}
+
+function getNoteBase(noteName) {
+  return noteName.replace(/\d/g, "");
+}
+
+function holdLastReadout(timestamp, rms) {
+  if (!state.hasReading) {
+    showIdleReadout(rms < analysisConfig.minRms ? "Suona piu vicino al microfono" : "Cerco la nota");
+    return;
+  }
+
+  const elapsed = timestamp - state.lastSignalAt;
+  if (elapsed < analysisConfig.holdMs) {
+    elements.tuningMessage.textContent =
+      rms < analysisConfig.minRms ? "Ultima lettura" : "Segnale instabile";
+    return;
+  }
+
   elements.tuningMessage.classList.remove("is-flat", "is-sharp", "is-tuned");
+  elements.tuningMessage.textContent = "Ultima nota";
+  clearDetectedString();
+}
+
+function showIdleReadout(message) {
+  elements.noteName.textContent = "--";
+  elements.frequencyValue.textContent = "-- Hz";
+  elements.tuningMessage.textContent = message;
+  elements.tuningMessage.classList.remove("is-flat", "is-sharp", "is-tuned");
+  clearDetectedString();
+}
+
+function resetReadout() {
+  state.lastSignalAt = 0;
+  state.smoothedCents = null;
+  state.smoothedFrequency = null;
+  state.graphHistory = [];
+  state.hasReading = false;
+  elements.signalFill.style.width = "0%";
+  elements.signalText.textContent = "In attesa";
+  showIdleReadout("In attesa di segnale");
+  drawGraph();
 }
 
 function stopListening() {
@@ -412,33 +654,9 @@ function stopListening() {
   state.listening = false;
   elements.startButton.textContent = "Avvia microfono";
 
-  if (!state.testToneOn) {
-    cancelAnimationFrame(state.rafId);
-    setStatus("Pronto. Concedi il microfono per iniziare.", "idle");
-    showIdleReadout("In attesa di segnale");
-  }
-}
-
-function stopTestTone() {
-  if (state.oscillator) {
-    state.oscillator.stop();
-    state.oscillator.disconnect();
-  }
-
-  if (state.gain) {
-    state.gain.disconnect();
-  }
-
-  state.oscillator = null;
-  state.gain = null;
-  state.testToneOn = false;
-  updateTestToneButton();
-
-  if (!state.listening) {
-    cancelAnimationFrame(state.rafId);
-    setStatus("Pronto. Concedi il microfono per iniziare.", "idle");
-    showIdleReadout("In attesa di segnale");
-  }
+  cancelAnimationFrame(state.rafId);
+  setStatus("Pronto. Concedi il microfono per iniziare.", "idle");
+  resetReadout();
 }
 
 function setStatus(message, type) {

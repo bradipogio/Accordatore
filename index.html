@@ -8,30 +8,19 @@
       content="Accordatore web cromatico con preset per chitarra, basso e ukulele."
     />
     <title>Accordatore</title>
-    <link rel="preconnect" href="https://images.unsplash.com" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main class="app-shell">
       <section class="tuner-section" aria-labelledby="app-title">
-        <div class="brand-row">
-          <div>
-            <p class="eyebrow">Accordatore cromatico</p>
-            <h1 id="app-title">Trova la nota, centra la lancetta.</h1>
-          </div>
-          <img
-            class="instrument-photo"
-            src="https://images.unsplash.com/photo-1761472083631-5ee7badc4cb7?auto=format&fit=crop&fm=jpg&q=70&w=760"
-            alt="Paletta di chitarra con meccaniche di accordatura"
-          />
-        </div>
+        <header class="app-header">
+          <p class="eyebrow">Accordatore</p>
+          <h1 id="app-title">Suona una corda.</h1>
+        </header>
 
         <div class="controls-strip" aria-label="Controlli accordatore">
           <button id="startButton" class="primary-button" type="button">
             Avvia microfono
-          </button>
-          <button id="testToneButton" class="secondary-button" type="button">
-            Prova con La 440
           </button>
           <label class="control-field" for="tuningSelect">
             Strumento
@@ -61,53 +50,48 @@
           <span id="statusText">Pronto. Concedi il microfono per iniziare.</span>
         </div>
 
-        <section class="tuner-panel" aria-label="Indicatore di accordatura">
-          <div class="meter" aria-hidden="true">
-            <div class="meter-arc"></div>
-            <div class="meter-zones">
-              <span>-50</span>
-              <span>-25</span>
-              <span>0</span>
-              <span>+25</span>
-              <span>+50</span>
-            </div>
-            <div id="needle" class="needle"></div>
-            <div class="center-pin"></div>
+        <div class="signal-row" aria-label="Livello del segnale">
+          <span>Volume</span>
+          <div class="signal-meter" aria-hidden="true">
+            <div id="signalFill" class="signal-fill"></div>
           </div>
+          <strong id="signalText">In attesa</strong>
+        </div>
 
+        <section class="tuner-panel" aria-label="Indicatore di accordatura">
           <div class="readout">
             <p id="noteName" class="note-name">--</p>
-            <p id="centsValue" class="cents-value">In attesa di segnale</p>
             <p id="frequencyValue" class="frequency-value">-- Hz</p>
           </div>
 
-          <div class="target-row">
-            <span>Troppo bassa</span>
-            <strong id="tuningMessage">Suona una corda singola</strong>
-            <span>Troppo alta</span>
+          <div class="intonation-graph">
+            <div class="graph-labels" aria-hidden="true">
+              <span>Bassa</span>
+              <strong>0 cent</strong>
+              <span>Alta</span>
+            </div>
+            <canvas
+              id="intonationCanvas"
+              class="intonation-canvas"
+              width="900"
+              height="420"
+              aria-label="Grafico dello scostamento in centesimi nel tempo"
+            ></canvas>
+            <div class="graph-axis" aria-hidden="true">
+              <span>Prima</span>
+              <span>Ora</span>
+            </div>
           </div>
+
+          <strong id="tuningMessage" class="tuning-message">Suona una corda singola</strong>
         </section>
       </section>
 
       <section class="string-section" aria-labelledby="strings-title">
-        <div>
-          <p class="eyebrow">Riferimenti rapidi</p>
-          <h2 id="strings-title">Corde del preset</h2>
-        </div>
+        <h2 id="strings-title">Corde</h2>
         <div id="stringList" class="string-list"></div>
       </section>
     </main>
-
-    <footer class="page-footer">
-      <span>Funziona meglio in una stanza silenziosa e con una corda alla volta.</span>
-      <a
-        href="https://unsplash.com/photos/close-up-of-a-guitar-headstock-with-tuning-pegs-ECe-Vt2Qh0g"
-        target="_blank"
-        rel="noreferrer"
-      >
-        Foto: Thomas Marquize
-      </a>
-    </footer>
 
     <script src="app.js"></script>
   </body>

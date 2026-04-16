@@ -17,6 +17,7 @@ Il microfono richiede un contesto sicuro: `localhost` è supportato dai browser 
 ## Funzioni
 
 - Rilevamento frequenza in tempo reale con Web Audio API.
-- Indicatore in centesimi per capire se la nota è bassa, intonata o alta.
+- Grafico verticale dell'intonazione nel tempo, con pause vuote quando non c'è segnale.
+- Valore dei centesimi vicino al punto rilevato.
+- Evidenzia la corda del preset più vicina alla nota rilevata.
 - Calibrazione del La centrale tra 400 e 480 Hz.
-- Tono di prova per controllare rapidamente la risposta dell'interfaccia.
