@@ -60,6 +60,7 @@ const elements = {
   signalFill: document.querySelector("#signalFill"),
   signalText: document.querySelector("#signalText"),
   intonationCanvas: document.querySelector("#intonationCanvas"),
+  headstockStage: document.querySelector(".headstock-stage"),
   noteName: document.querySelector("#noteName"),
   noteCue: document.querySelector("#noteCue"),
   frequencyValue: document.querySelector("#frequencyValue"),
@@ -496,19 +497,31 @@ function refreshPresetUi() {
 function renderStringList() {
   const selectedTuning = tunings[elements.tuningSelect.value];
   elements.stringList.innerHTML = "";
+  elements.headstockStage.dataset.tuning = elements.tuningSelect.value;
+  elements.headstockStage.dataset.stringCount = String(selectedTuning.notes.length || 0);
 
   const notes =
     selectedTuning.notes.length > 0
       ? getScaledPresetNotes(selectedTuning.notes, getReferencePitch())
       : [
           { name: "C", frequency: null },
+          { name: "C#", frequency: null },
           { name: "D", frequency: null },
+          { name: "D#", frequency: null },
           { name: "E", frequency: null },
           { name: "F", frequency: null },
+          { name: "F#", frequency: null },
           { name: "G", frequency: null },
+          { name: "G#", frequency: null },
           { name: "A", frequency: null },
+          { name: "A#", frequency: null },
           { name: "B", frequency: null },
         ];
+
+  if (!selectedTuning.notes.length) {
+    return;
+  }
+
   notes.forEach((note, noteIndex) => {
     const pegPosition = getPegPosition(noteIndex, notes.length);
     const pill = document.createElement("div");
@@ -538,7 +551,7 @@ function getPegPosition(noteIndex, noteCount) {
   const row = isLeftSide ? leftColumnCount - noteIndex : noteIndex - leftColumnCount + 1;
 
   return {
-    x: isLeftSide ? 20 : 168,
+    x: isLeftSide ? 29 : 159,
     y: getPegRowY(row, sideCount),
   };
 }
@@ -546,7 +559,7 @@ function getPegPosition(noteIndex, noteCount) {
 function getPegRowY(row, rowCount) {
   const fixedRows = {
     1: [134],
-    2: [106, 162],
+    2: [78, 190],
     3: [78, 134, 190],
     4: [64, 106, 148, 190],
   };

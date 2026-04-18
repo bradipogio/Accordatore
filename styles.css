@@ -408,6 +408,14 @@ button:focus-visible {
   fill: var(--panel);
 }
 
+.headstock-stage[data-tuning="chromatic"] .headstock-wrap {
+  display: none;
+}
+
+.headstock-stage[data-string-count="4"] .peg-middle {
+  display: none;
+}
+
 .graph-labels {
   position: absolute;
   z-index: 6;
