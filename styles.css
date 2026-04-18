@@ -7,7 +7,7 @@
   --coral: #ff5a4f;
   --amber: #ffb800;
   --green: #2ee66b;
-  --pink: #ff7ac8;
+  --pink: #7edbff;
   --blue: #5bb8ff;
   --grid: rgba(17, 17, 17, 0.08);
   --font:
@@ -25,7 +25,7 @@
   --coral: #ff3d81;
   --amber: #fff95b;
   --green: #00ff9d;
-  --pink: #ff4dff;
+  --pink: #7ee8ff;
   --blue: #00d9ff;
   --grid: rgba(0, 217, 255, 0.16);
   --shadow: 0 0 0 3px #f7f7ff, 0 0 22px rgba(255, 77, 255, 0.85);
@@ -40,7 +40,7 @@
   --coral: #ff4f4f;
   --amber: #ffd23f;
   --green: #39ff14;
-  --pink: #ff66c4;
+  --pink: #74d7ff;
   --blue: #5aa9ff;
   --grid: rgba(18, 18, 18, 0.12);
   --font: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
@@ -129,7 +129,7 @@ h2 {
   min-height: 34px;
   border: 3px solid var(--ink);
   border-radius: 6px;
-  background: var(--green);
+  background: var(--panel);
   color: var(--ink);
   box-shadow: var(--shadow-small);
   cursor: pointer;
@@ -153,11 +153,27 @@ h2 {
   place-items: center;
   width: 42px;
   min-height: 34px;
+  background: #d7d7d7;
   padding: 0;
 }
 
 .mic-button.is-listening {
+  background: var(--green);
+}
+
+.mic-button::after {
+  content: "";
+  position: absolute;
+  width: 31px;
+  height: 4px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
   background: var(--coral);
+  transform: rotate(-38deg);
+}
+
+.mic-button.is-listening::after {
+  display: none;
 }
 
 .mic-icon {

@@ -758,10 +758,10 @@ function getCursorY(padding, graphHeight) {
 
 function formatCueCents(cents) {
   if (!Number.isFinite(cents) || Math.abs(cents) <= 1) {
-    return "0¢";
+    return "0";
   }
 
-  return `${cents > 0 ? "+" : ""}${Math.round(cents)}¢`;
+  return `${cents > 0 ? "+" : ""}${Math.round(cents)}`;
 }
 
 function getCanvasColors() {
