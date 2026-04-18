@@ -1,4 +1,18 @@
 const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const italianNoteNames = {
+  C: "Do",
+  "C#": "Do#",
+  D: "Re",
+  "D#": "Re#",
+  E: "Mi",
+  F: "Fa",
+  "F#": "Fa#",
+  G: "Sol",
+  "G#": "Sol#",
+  A: "La",
+  "A#": "La#",
+  B: "Si",
+};
 
 const tunings = {
   chromatic: {
@@ -47,6 +61,7 @@ const elements = {
   signalText: document.querySelector("#signalText"),
   intonationCanvas: document.querySelector("#intonationCanvas"),
   noteName: document.querySelector("#noteName"),
+  noteCue: document.querySelector("#noteCue"),
   frequencyValue: document.querySelector("#frequencyValue"),
   tuningMessage: document.querySelector("#tuningMessage"),
   stringList: document.querySelector("#stringList"),
@@ -65,6 +80,7 @@ const analysisConfig = {
   pitchHistorySize: 5,
   pitchJumpResetCents: 150,
   targetSwitchMarginCents: 12,
+  noteConfirmationMs: 210,
   holdMs: 3200,
   centsSmoothing: 0.22,
   frequencySmoothing: 0.3,
@@ -86,6 +102,9 @@ const state = {
   smoothedCents: null,
   smoothedFrequency: null,
   lockedTarget: null,
+  pendingTarget: null,
+  pendingTargetSince: 0,
+  confirmedTarget: null,
   pitchHistory: [],
   graphHistory: [],
   hasReading: false,
@@ -219,12 +238,25 @@ function analyze(timestamp) {
   }
 
   state.lastSignalAt = timestamp;
-  updateReadout(stabilizeFrequency(result.frequency));
+  updateReadout(stabilizeFrequency(result.frequency), timestamp);
 }
 
-function updateReadout(frequency) {
+function updateReadout(frequency, timestamp) {
   const referencePitch = Number(elements.referencePitch.value) || 440;
   const target = stabilizeTarget(frequency, referencePitch);
+
+  if (!confirmStableTarget(target, timestamp)) {
+    pushGraphPoint(null);
+    showPendingReadout();
+    return;
+  }
+
+  const targetChanged = !isSameTarget(target, state.confirmedTarget);
+  if (targetChanged) {
+    state.smoothedCents = null;
+    state.smoothedFrequency = null;
+  }
+
   const cents = 1200 * Math.log2(frequency / target.frequency);
   const clampedCents = clamp(cents, -50, 50);
   const displayCents = state.hasReading
@@ -234,10 +266,13 @@ function updateReadout(frequency) {
     ? state.smoothedFrequency + (frequency - state.smoothedFrequency) * analysisConfig.frequencySmoothing
     : frequency;
 
-  elements.noteName.textContent = target.name;
+  elements.noteName.textContent = formatNoteName(target.name);
+  elements.noteCue.textContent = formatNoteName(target.name, false);
+  elements.noteCue.classList.add("is-live");
   elements.frequencyValue.textContent = `${displayFrequency.toFixed(1)} Hz`;
   state.smoothedCents = displayCents;
   state.smoothedFrequency = displayFrequency;
+  state.confirmedTarget = { ...target };
   state.hasReading = true;
   pushGraphPoint({ cents: displayCents });
   highlightDetectedString(target.name);
@@ -280,7 +315,7 @@ function stabilizeTarget(frequency, referencePitch) {
 
   if (!state.lockedTarget || state.lockedTarget.referencePitch !== referencePitch) {
     state.lockedTarget = { ...candidate, referencePitch };
-    return candidate;
+    return state.lockedTarget;
   }
 
   const lockedDistance = Math.abs(1200 * Math.log2(frequency / state.lockedTarget.frequency));
@@ -294,6 +329,38 @@ function stabilizeTarget(frequency, referencePitch) {
   }
 
   return state.lockedTarget;
+}
+
+function confirmStableTarget(target, timestamp) {
+  if (isSameTarget(target, state.confirmedTarget)) {
+    state.pendingTarget = null;
+    state.pendingTargetSince = 0;
+    return true;
+  }
+
+  if (!isSameTarget(target, state.pendingTarget)) {
+    state.pendingTarget = { ...target };
+    state.pendingTargetSince = timestamp;
+    return false;
+  }
+
+  if (timestamp - state.pendingTargetSince < analysisConfig.noteConfirmationMs) {
+    return false;
+  }
+
+  state.pendingTarget = null;
+  state.pendingTargetSince = 0;
+  return true;
+}
+
+function isSameTarget(target, otherTarget) {
+  return (
+    target &&
+    otherTarget &&
+    target.name === otherTarget.name &&
+    Math.abs(target.frequency - otherTarget.frequency) < 0.01 &&
+    target.referencePitch === otherTarget.referencePitch
+  );
 }
 
 function stabilizeFrequency(frequency) {
@@ -413,6 +480,9 @@ function refreshPresetUi() {
   clearDetectedString();
   state.lockedTarget = null;
   state.pitchHistory = [];
+  state.pendingTarget = null;
+  state.pendingTargetSince = 0;
+  state.confirmedTarget = null;
 }
 
 function renderStringList() {
@@ -432,13 +502,23 @@ function renderStringList() {
           { name: "B", frequency: null },
         ];
 
-  notes.forEach((note) => {
+  const leftColumnCount = Math.ceil(notes.length / 2);
+  elements.stringList.style.setProperty("--string-rows", String(leftColumnCount));
+
+  notes.forEach((note, noteIndex) => {
+    const isLeftSide = noteIndex < leftColumnCount;
+    const row = isLeftSide ? leftColumnCount - noteIndex : noteIndex - leftColumnCount + 1;
     const pill = document.createElement("div");
     pill.className = "string-pill";
     pill.dataset.note = note.name;
+    pill.style.setProperty("--string-column", isLeftSide ? "1" : "3");
+    pill.style.setProperty("--string-row", String(row));
+    pill.setAttribute("aria-label", `${formatNoteName(note.name)} ${
+      note.frequency ? `${note.frequency.toFixed(2)} Hz` : "tutte le ottave"
+    }`);
 
     const name = document.createElement("strong");
-    name.textContent = note.name;
+    name.textContent = formatNoteName(note.name, false);
 
     const frequency = document.createElement("span");
     frequency.textContent = note.frequency ? `${note.frequency.toFixed(2)} Hz` : "Tutte le ottave";
@@ -743,10 +823,42 @@ function clearDetectedString() {
 }
 
 function getNoteBase(noteName) {
-  return noteName.replace(/\d/g, "");
+  return noteName.replace(/-?\d+$/, "");
+}
+
+function formatNoteName(noteName, includeOctave = true) {
+  const match = String(noteName).match(/^([A-G]#?)(-?\d+)?$/);
+
+  if (!match) {
+    return noteName;
+  }
+
+  const baseName = italianNoteNames[match[1]] || match[1];
+  return includeOctave && match[2] ? `${baseName}${match[2]}` : baseName;
+}
+
+function showPendingReadout() {
+  elements.tuningMessage.classList.remove("is-flat", "is-sharp", "is-tuned");
+
+  if (state.hasReading) {
+    elements.tuningMessage.textContent = "Verifico il cambio nota";
+    return;
+  }
+
+  elements.noteName.textContent = "--";
+  elements.noteCue.textContent = "--";
+  elements.noteCue.classList.remove("is-live");
+  elements.frequencyValue.textContent = "-- Hz";
+  elements.tuningMessage.textContent = "Verifico la nota";
+  clearDetectedString();
 }
 
 function holdLastReadout(timestamp, rms) {
+  if (timestamp - state.lastSignalAt > analysisConfig.noteConfirmationMs) {
+    state.pendingTarget = null;
+    state.pendingTargetSince = 0;
+  }
+
   if (!state.hasReading) {
     showIdleReadout(rms < analysisConfig.minRms ? "Suona piu vicino al microfono" : "Cerco la nota");
     return;
@@ -766,6 +878,8 @@ function holdLastReadout(timestamp, rms) {
 
 function showIdleReadout(message) {
   elements.noteName.textContent = "--";
+  elements.noteCue.textContent = "--";
+  elements.noteCue.classList.remove("is-live");
   elements.frequencyValue.textContent = "-- Hz";
   elements.tuningMessage.textContent = message;
   elements.tuningMessage.classList.remove("is-flat", "is-sharp", "is-tuned");
@@ -777,6 +891,9 @@ function resetReadout() {
   state.smoothedCents = null;
   state.smoothedFrequency = null;
   state.lockedTarget = null;
+  state.pendingTarget = null;
+  state.pendingTargetSince = 0;
+  state.confirmedTarget = null;
   state.pitchHistory = [];
   state.graphHistory = [];
   state.hasReading = false;
