@@ -141,7 +141,7 @@ elements.referencePitch.addEventListener("change", () => {
 
 async function toggleMicrophone() {
   if (state.listening) {
-    stopListening();
+    pauseListening();
     return;
   }
 
@@ -153,29 +153,49 @@ async function toggleMicrophone() {
     setStatus("Richiesta accesso al microfono...", "idle");
     await ensureAudioContext();
 
-    state.mediaStream = await getMicrophoneStream();
+    if (!hasLiveMicrophoneStream()) {
+      releaseMicrophone();
+      state.mediaStream = await getMicrophoneStream();
+      connectMicrophoneGraph();
+    }
 
-    state.source = state.audioContext.createMediaStreamSource(state.mediaStream);
-    state.highPass = createFilter("highpass", analysisConfig.highPassHz);
-    state.lowPass = createFilter("lowpass", analysisConfig.lowPassHz);
-    state.inputGain = state.audioContext.createGain();
-    state.inputGain.gain.value = analysisConfig.inputGain;
-    state.source.connect(state.highPass);
-    state.highPass.connect(state.lowPass);
-    state.lowPass.connect(state.inputGain);
-    state.inputGain.connect(state.analyser);
+    setMicrophoneTracksEnabled(true);
     state.listening = true;
     setMicrophoneButtonState(true);
     setStatus("Microfono attivo.", "live");
     scheduleAnalysis();
   } catch (error) {
-    stopListening();
+    releaseMicrophone();
     const message =
       error.name === "NotAllowedError"
         ? "Permesso microfono negato."
         : "Microfono non disponibile in questo browser.";
     setStatus(message, "error");
   }
+}
+
+function connectMicrophoneGraph() {
+  state.source = state.audioContext.createMediaStreamSource(state.mediaStream);
+  state.highPass = createFilter("highpass", analysisConfig.highPassHz);
+  state.lowPass = createFilter("lowpass", analysisConfig.lowPassHz);
+  state.inputGain = state.audioContext.createGain();
+  state.inputGain.gain.value = analysisConfig.inputGain;
+  state.source.connect(state.highPass);
+  state.highPass.connect(state.lowPass);
+  state.lowPass.connect(state.inputGain);
+  state.inputGain.connect(state.analyser);
+}
+
+function hasLiveMicrophoneStream() {
+  return Boolean(
+    state.mediaStream?.getAudioTracks().some((track) => track.readyState === "live"),
+  );
+}
+
+function setMicrophoneTracksEnabled(isEnabled) {
+  state.mediaStream?.getAudioTracks().forEach((track) => {
+    track.enabled = isEnabled;
+  });
 }
 
 function createFilter(type, frequency) {
@@ -945,7 +965,17 @@ function resetReadout() {
   drawGraph();
 }
 
-function stopListening() {
+function pauseListening() {
+  setMicrophoneTracksEnabled(false);
+  state.listening = false;
+  setMicrophoneButtonState(false);
+
+  cancelAnimationFrame(state.rafId);
+  setStatus("Microfono in pausa.", "idle");
+  resetReadout();
+}
+
+function releaseMicrophone() {
   if (state.mediaStream) {
     state.mediaStream.getTracks().forEach((track) => track.stop());
   }
@@ -975,7 +1005,6 @@ function stopListening() {
   setMicrophoneButtonState(false);
 
   cancelAnimationFrame(state.rafId);
-  setStatus("Pronto. Concedi il microfono per iniziare.", "idle");
   resetReadout();
 }
 
