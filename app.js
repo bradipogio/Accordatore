@@ -111,6 +111,7 @@ const state = {
   graphHistory: [],
   hasReading: false,
   listening: false,
+  resumeWhenVisible: false,
 };
 
 const graph = {
@@ -138,6 +139,16 @@ elements.referencePitch.addEventListener("change", () => {
   normalizeReferencePitch();
   refreshPresetUi();
 });
+document.addEventListener("visibilitychange", handleVisibilityChange);
+window.addEventListener("pagehide", (event) => {
+  if (event.persisted) {
+    parkMicrophoneForBackground();
+    return;
+  }
+
+  releaseMicrophone();
+});
+window.addEventListener("freeze", parkMicrophoneForBackground);
 
 async function toggleMicrophone() {
   if (state.listening) {
@@ -174,6 +185,54 @@ async function toggleMicrophone() {
   }
 }
 
+function handleVisibilityChange() {
+  if (document.hidden) {
+    parkMicrophoneForBackground();
+    return;
+  }
+
+  resumeMicrophoneFromBackground();
+}
+
+function parkMicrophoneForBackground() {
+  state.resumeWhenVisible = state.resumeWhenVisible || state.listening;
+
+  if (!state.listening && !hasLiveMicrophoneStream()) {
+    return;
+  }
+
+  setMicrophoneTracksEnabled(false);
+  state.listening = false;
+  setMicrophoneButtonState(false);
+  cancelAnimationFrame(state.rafId);
+  suspendAudioContext();
+  resetReadout();
+}
+
+async function resumeMicrophoneFromBackground() {
+  if (!state.resumeWhenVisible) {
+    return;
+  }
+
+  state.resumeWhenVisible = false;
+
+  if (!hasLiveMicrophoneStream()) {
+    setStatus("Microfono in pausa.", "idle");
+    return;
+  }
+
+  try {
+    await ensureAudioContext();
+    setMicrophoneTracksEnabled(true);
+    state.listening = true;
+    setMicrophoneButtonState(true);
+    setStatus("Microfono attivo.", "live");
+    scheduleAnalysis();
+  } catch (error) {
+    pauseListening();
+  }
+}
+
 function connectMicrophoneGraph() {
   state.source = state.audioContext.createMediaStreamSource(state.mediaStream);
   state.highPass = createFilter("highpass", analysisConfig.highPassHz);
@@ -196,6 +255,14 @@ function setMicrophoneTracksEnabled(isEnabled) {
   state.mediaStream?.getAudioTracks().forEach((track) => {
     track.enabled = isEnabled;
   });
+}
+
+function suspendAudioContext() {
+  if (state.audioContext?.state === "running") {
+    state.audioContext.suspend().catch(() => {
+      // The browser can refuse suspension during lifecycle transitions.
+    });
+  }
 }
 
 function createFilter(type, frequency) {
@@ -968,9 +1035,11 @@ function resetReadout() {
 function pauseListening() {
   setMicrophoneTracksEnabled(false);
   state.listening = false;
+  state.resumeWhenVisible = false;
   setMicrophoneButtonState(false);
 
   cancelAnimationFrame(state.rafId);
+  suspendAudioContext();
   setStatus("Microfono in pausa.", "idle");
   resetReadout();
 }
@@ -1002,6 +1071,7 @@ function releaseMicrophone() {
   state.lowPass = null;
   state.inputGain = null;
   state.listening = false;
+  state.resumeWhenVisible = false;
   setMicrophoneButtonState(false);
 
   cancelAnimationFrame(state.rafId);
