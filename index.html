@@ -2,7 +2,10 @@
 <html lang="it">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <meta
       name="description"
       content="Accordatore web cromatico con preset per chitarra, basso e ukulele."
@@ -77,28 +80,7 @@
             <p id="frequencyValue" class="frequency-value">-- Hz</p>
           </div>
 
-          <section class="headstock-stage" aria-label="Paletta delle note">
-            <div id="noteCue" class="note-cue" aria-live="polite">--</div>
-            <div class="headstock-wrap">
-              <div class="headstock-art" aria-hidden="true">
-                <span class="headstock-peg peg-left peg-one"></span>
-                <span class="headstock-peg peg-left peg-two"></span>
-                <span class="headstock-peg peg-left peg-three"></span>
-                <span class="headstock-peg peg-right peg-one"></span>
-                <span class="headstock-peg peg-right peg-two"></span>
-                <span class="headstock-peg peg-right peg-three"></span>
-                <span class="headstock-string string-one"></span>
-                <span class="headstock-string string-two"></span>
-                <span class="headstock-string string-three"></span>
-                <span class="headstock-string string-four"></span>
-                <span class="headstock-string string-five"></span>
-                <span class="headstock-string string-six"></span>
-              </div>
-              <div id="stringList" class="string-list"></div>
-            </div>
-          </section>
-
-          <div class="intonation-graph">
+          <section class="headstock-stage" aria-label="Grafico e paletta delle note">
             <div class="graph-labels" aria-hidden="true">
               <span>Bassa</span>
               <strong>0 cent</strong>
@@ -108,10 +90,38 @@
               id="intonationCanvas"
               class="intonation-canvas"
               width="900"
-              height="420"
+              height="620"
               aria-label="Grafico dello scostamento in centesimi nel tempo"
             ></canvas>
-          </div>
+            <div id="noteCue" class="note-cue" aria-live="polite">--</div>
+            <div class="headstock-wrap">
+              <div class="headstock-art" aria-hidden="true">
+                <svg class="headstock-svg" viewBox="0 0 188 292" focusable="false">
+                  <g class="headstock-fill">
+                    <rect x="0" y="66" width="57" height="24" rx="12"></rect>
+                    <rect x="0" y="122" width="57" height="24" rx="12"></rect>
+                    <rect x="0" y="178" width="57" height="24" rx="12"></rect>
+                    <rect x="131" y="66" width="57" height="24" rx="12"></rect>
+                    <rect x="131" y="122" width="57" height="24" rx="12"></rect>
+                    <rect x="131" y="178" width="57" height="24" rx="12"></rect>
+                    <rect x="68" y="226" width="52" height="66"></rect>
+                    <path
+                      d="M94 0C83 0 77 8 74 19C62 17 50 22 42 32L35 186C35 199 47 213 56 224L66 250H122L132 224C141 213 153 199 153 186L146 32C138 22 126 17 114 19C111 8 105 0 94 0Z"
+                    ></path>
+                  </g>
+                  <g class="headstock-ports">
+                    <circle cx="74" cy="78" r="11"></circle>
+                    <circle cx="74" cy="134" r="11"></circle>
+                    <circle cx="74" cy="190" r="11"></circle>
+                    <circle cx="114" cy="78" r="11"></circle>
+                    <circle cx="114" cy="134" r="11"></circle>
+                    <circle cx="114" cy="190" r="11"></circle>
+                  </g>
+                </svg>
+              </div>
+              <div id="stringList" class="string-list"></div>
+            </div>
+          </section>
 
           <strong id="tuningMessage" class="tuning-message">In attesa</strong>
         </section>

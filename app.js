@@ -105,6 +105,7 @@ const state = {
   pendingTarget: null,
   pendingTargetSince: 0,
   confirmedTarget: null,
+  cueCents: null,
   pitchHistory: [],
   graphHistory: [],
   hasReading: false,
@@ -115,6 +116,10 @@ const graph = {
   context: elements.intonationCanvas.getContext("2d"),
   pixelRatio: 1,
   resizeObserver: null,
+};
+
+const graphConfig = {
+  padding: 44,
 };
 
 setupGraphCanvas();
@@ -269,6 +274,7 @@ function updateReadout(frequency, timestamp) {
   elements.noteName.textContent = formatNoteName(target.name);
   elements.noteCue.textContent = formatNoteName(target.name, false);
   elements.noteCue.classList.add("is-live");
+  updateCuePosition(displayCents);
   elements.frequencyValue.textContent = `${displayFrequency.toFixed(1)} Hz`;
   state.smoothedCents = displayCents;
   state.smoothedFrequency = displayFrequency;
@@ -483,6 +489,7 @@ function refreshPresetUi() {
   state.pendingTarget = null;
   state.pendingTargetSince = 0;
   state.confirmedTarget = null;
+  updateCuePosition(null);
 }
 
 function renderStringList() {
@@ -501,18 +508,13 @@ function renderStringList() {
           { name: "A", frequency: null },
           { name: "B", frequency: null },
         ];
-
-  const leftColumnCount = Math.ceil(notes.length / 2);
-  elements.stringList.style.setProperty("--string-rows", String(leftColumnCount));
-
   notes.forEach((note, noteIndex) => {
-    const isLeftSide = noteIndex < leftColumnCount;
-    const row = isLeftSide ? leftColumnCount - noteIndex : noteIndex - leftColumnCount + 1;
+    const pegPosition = getPegPosition(noteIndex, notes.length);
     const pill = document.createElement("div");
     pill.className = "string-pill";
     pill.dataset.note = note.name;
-    pill.style.setProperty("--string-column", isLeftSide ? "1" : "3");
-    pill.style.setProperty("--string-row", String(row));
+    pill.style.setProperty("--pill-x", `${pegPosition.x}px`);
+    pill.style.setProperty("--pill-y", `${pegPosition.y}px`);
     pill.setAttribute("aria-label", `${formatNoteName(note.name)} ${
       note.frequency ? `${note.frequency.toFixed(2)} Hz` : "tutte le ottave"
     }`);
@@ -526,6 +528,36 @@ function renderStringList() {
     pill.append(name, frequency);
     elements.stringList.append(pill);
   });
+}
+
+function getPegPosition(noteIndex, noteCount) {
+  const leftColumnCount = Math.ceil(noteCount / 2);
+  const isLeftSide = noteIndex < leftColumnCount;
+  const sideCount = isLeftSide ? leftColumnCount : noteCount - leftColumnCount;
+  const row = isLeftSide ? leftColumnCount - noteIndex : noteIndex - leftColumnCount + 1;
+
+  return {
+    x: isLeftSide ? 20 : 168,
+    y: getPegRowY(row, sideCount),
+  };
+}
+
+function getPegRowY(row, rowCount) {
+  const fixedRows = {
+    1: [134],
+    2: [106, 162],
+    3: [78, 134, 190],
+    4: [64, 106, 148, 190],
+  };
+
+  if (fixedRows[rowCount]) {
+    return fixedRows[rowCount][row - 1];
+  }
+
+  const firstY = 58;
+  const lastY = 202;
+  const step = (lastY - firstY) / Math.max(rowCount - 1, 1);
+  return firstY + step * (row - 1);
 }
 
 function getScaledPresetNotes(notes, referencePitch) {
@@ -574,6 +606,7 @@ function resizeGraphCanvas() {
   elements.intonationCanvas.width = Math.round(width * graph.pixelRatio);
   elements.intonationCanvas.height = Math.round(height * graph.pixelRatio);
   graph.context.setTransform(graph.pixelRatio, 0, 0, graph.pixelRatio, 0, 0);
+  updateCuePosition(state.cueCents);
 }
 
 function pushGraphPoint(cents) {
@@ -591,7 +624,7 @@ function drawGraph() {
   const context = graph.context;
   const width = canvas.width / graph.pixelRatio;
   const height = canvas.height / graph.pixelRatio;
-  const padding = 24;
+  const padding = graphConfig.padding;
   const graphWidth = width - padding * 2;
   const graphHeight = height - padding * 2;
   const colors = getCanvasColors();
@@ -697,45 +730,29 @@ function drawHistoryLine(context, padding, graphWidth, graphHeight, colors) {
   context.strokeStyle = colors.ink;
   context.stroke();
 
-  const current = history[history.length - 1];
-  if (!current) {
-    return;
-  }
-
-  const latestX = centsToX(current.cents, padding, graphWidth);
-  const latestY = cursorY;
-  const label = formatCentsLabel(current.cents);
-
-  context.beginPath();
-  context.fillStyle =
-    Math.abs(current.cents) <= 5 ? colors.green : current.cents > 0 ? colors.amber : colors.coral;
-  context.strokeStyle = colors.ink;
-  context.lineWidth = 4;
-  context.arc(latestX, latestY, 17, 0, Math.PI * 2);
-  context.fill();
-  context.stroke();
-
-  context.fillStyle = colors.ink;
-  context.font = "900 11px system-ui, sans-serif";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.fillText(label, latestX, latestY);
 }
 
 function centsToX(cents, padding, graphWidth) {
   return padding + ((cents + 50) / 100) * graphWidth;
 }
 
-function getCursorY(padding, graphHeight) {
-  return padding + graphHeight / 2;
-}
+function updateCuePosition(cents) {
+  state.cueCents = Number.isFinite(cents) ? clamp(cents, -50, 50) : null;
 
-function formatCentsLabel(cents) {
-  if (Math.abs(cents) <= 5) {
-    return "0";
+  const canvasWidth = elements.intonationCanvas.getBoundingClientRect().width;
+  if (!canvasWidth) {
+    elements.noteCue.style.left = "50%";
+    return;
   }
 
-  return `${cents > 0 ? "+" : ""}${Math.round(cents)}`;
+  const ratio = state.cueCents === null ? 0.5 : (state.cueCents + 50) / 100;
+  const graphWidth = Math.max(canvasWidth - graphConfig.padding * 2, 0);
+  const x = graphConfig.padding + ratio * graphWidth;
+  elements.noteCue.style.left = `${x}px`;
+}
+
+function getCursorY(padding, graphHeight) {
+  return padding + graphHeight / 2;
 }
 
 function getCanvasColors() {
@@ -848,6 +865,7 @@ function showPendingReadout() {
   elements.noteName.textContent = "--";
   elements.noteCue.textContent = "--";
   elements.noteCue.classList.remove("is-live");
+  updateCuePosition(null);
   elements.frequencyValue.textContent = "-- Hz";
   elements.tuningMessage.textContent = "Verifico la nota";
   clearDetectedString();
@@ -880,6 +898,7 @@ function showIdleReadout(message) {
   elements.noteName.textContent = "--";
   elements.noteCue.textContent = "--";
   elements.noteCue.classList.remove("is-live");
+  updateCuePosition(null);
   elements.frequencyValue.textContent = "-- Hz";
   elements.tuningMessage.textContent = message;
   elements.tuningMessage.classList.remove("is-flat", "is-sharp", "is-tuned");
@@ -894,6 +913,7 @@ function resetReadout() {
   state.pendingTarget = null;
   state.pendingTargetSince = 0;
   state.confirmedTarget = null;
+  state.cueCents = null;
   state.pitchHistory = [];
   state.graphHistory = [];
   state.hasReading = false;

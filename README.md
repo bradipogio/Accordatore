@@ -33,6 +33,6 @@ Su iPhone il microfono funziona correttamente solo da un contesto sicuro, quindi
 - Rilevamento frequenza in tempo reale con Web Audio API.
 - Grafico verticale dell'intonazione nel tempo, con pause vuote quando non c'è segnale.
 - Valore dei centesimi vicino al punto rilevato.
-- Paletta centrale con note in italiano e corda evidenziata dopo una breve conferma del rilevamento.
+- Paletta centrale sovrapposta al grafico, con note in italiano e corda evidenziata dopo una breve conferma del rilevamento.
 - Skin UI selezionabile: Brutal, Neon o Pixel.
 - Calibrazione del La centrale tra 400 e 480 Hz.
