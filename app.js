@@ -164,7 +164,7 @@ async function toggleMicrophone() {
     state.lowPass.connect(state.inputGain);
     state.inputGain.connect(state.analyser);
     state.listening = true;
-    elements.startButton.textContent = "Ferma microfono";
+    setMicrophoneButtonState(true);
     setStatus("Microfono attivo.", "live");
     scheduleAnalysis();
   } catch (error) {
@@ -959,11 +959,18 @@ function stopListening() {
   state.lowPass = null;
   state.inputGain = null;
   state.listening = false;
-  elements.startButton.textContent = "Avvia microfono";
+  setMicrophoneButtonState(false);
 
   cancelAnimationFrame(state.rafId);
   setStatus("Pronto. Concedi il microfono per iniziare.", "idle");
   resetReadout();
+}
+
+function setMicrophoneButtonState(isListening) {
+  const label = isListening ? "Ferma microfono" : "Avvia microfono";
+  elements.startButton.classList.toggle("is-listening", isListening);
+  elements.startButton.setAttribute("aria-label", label);
+  elements.startButton.setAttribute("title", label);
 }
 
 function setStatus(message, type) {

@@ -86,33 +86,16 @@ select {
 .app-shell {
   width: min(100% - 14px, 760px);
   margin: 0 auto;
-  padding: 7px 0 16px;
+  padding: 5px 0 14px;
 }
 
 .tuner-section {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 
 .app-header {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.eyebrow {
-  width: fit-content;
-  margin: 0;
-  border: 3px solid var(--ink);
-  border-radius: 6px;
-  background: var(--pink);
-  color: var(--ink);
-  padding: 5px 9px;
-  font-size: 0.75rem;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  position: absolute;
 }
 
 h1,
@@ -137,13 +120,13 @@ h2 {
 
 .controls-strip {
   display: grid;
-  grid-template-columns: minmax(126px, 1fr) minmax(82px, 0.75fr) 84px;
-  gap: 7px;
+  grid-template-columns: 42px minmax(118px, 1fr) minmax(76px, 0.72fr) 78px;
+  gap: 6px;
   align-items: end;
 }
 
 .primary-button {
-  min-height: 38px;
+  min-height: 34px;
   border: 3px solid var(--ink);
   border-radius: 6px;
   background: var(--green);
@@ -152,7 +135,7 @@ h2 {
   cursor: pointer;
   font-size: 0.88rem;
   font-weight: 900;
-  padding: 0 12px;
+  padding: 0 10px;
   transition:
     transform 120ms ease,
     box-shadow 120ms ease,
@@ -162,6 +145,52 @@ h2 {
 .primary-button:hover {
   transform: translate(2px, 2px);
   box-shadow: 2px 2px 0 var(--ink);
+}
+
+.mic-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  min-height: 34px;
+  padding: 0;
+}
+
+.mic-button.is-listening {
+  background: var(--coral);
+}
+
+.mic-icon {
+  position: relative;
+  display: block;
+  width: 13px;
+  height: 18px;
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  background: var(--panel);
+}
+
+.mic-icon::before {
+  content: "";
+  position: absolute;
+  right: -8px;
+  bottom: -7px;
+  left: -8px;
+  height: 10px;
+  border: 3px solid var(--ink);
+  border-top: 0;
+  border-radius: 0 0 999px 999px;
+}
+
+.mic-icon::after {
+  content: "";
+  position: absolute;
+  bottom: -12px;
+  left: 50%;
+  width: 3px;
+  height: 8px;
+  background: var(--ink);
+  transform: translateX(-50%);
 }
 
 .control-field {
@@ -473,23 +502,15 @@ button:focus-visible {
 @media (min-width: 720px) {
   .app-shell {
     width: min(1120px, calc(100% - 40px));
-    padding-top: 14px;
+    padding-top: 10px;
   }
 
   .tuner-section {
-    gap: 10px;
-  }
-
-  .app-header {
-    grid-template-columns: 1fr auto;
-  }
-
-  .primary-button {
-    min-width: 170px;
+    gap: 8px;
   }
 
   .controls-strip {
-    grid-template-columns: minmax(190px, 1fr) 130px 100px;
+    grid-template-columns: 44px minmax(190px, 1fr) 130px 100px;
   }
 
   .tuner-panel {
