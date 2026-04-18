@@ -120,6 +120,7 @@ const graph = {
 
 const graphConfig = {
   padding: 44,
+  cursorRatio: 0.24,
 };
 
 setupGraphCanvas();
@@ -272,7 +273,7 @@ function updateReadout(frequency, timestamp) {
     : frequency;
 
   elements.noteName.textContent = formatNoteName(target.name);
-  elements.noteCue.textContent = formatNoteName(target.name, false);
+  elements.noteCue.textContent = formatCueCents(displayCents);
   elements.noteCue.classList.add("is-live");
   updateCuePosition(displayCents);
   elements.frequencyValue.textContent = `${displayFrequency.toFixed(1)} Hz`;
@@ -752,7 +753,15 @@ function updateCuePosition(cents) {
 }
 
 function getCursorY(padding, graphHeight) {
-  return padding + graphHeight / 2;
+  return padding + graphHeight * graphConfig.cursorRatio;
+}
+
+function formatCueCents(cents) {
+  if (!Number.isFinite(cents) || Math.abs(cents) <= 1) {
+    return "0¢";
+  }
+
+  return `${cents > 0 ? "+" : ""}${Math.round(cents)}¢`;
 }
 
 function getCanvasColors() {
