@@ -55,6 +55,7 @@ const elements = {
   tuningSelect: document.querySelector("#tuningSelect"),
   skinSelect: document.querySelector("#skinSelect"),
   referencePitch: document.querySelector("#referencePitch"),
+  signalRow: document.querySelector("#signalRow"),
   statusDot: document.querySelector("#statusDot"),
   statusText: document.querySelector("#statusText"),
   signalFill: document.querySelector("#signalFill"),
@@ -64,7 +65,6 @@ const elements = {
   noteName: document.querySelector("#noteName"),
   noteCue: document.querySelector("#noteCue"),
   frequencyValue: document.querySelector("#frequencyValue"),
-  tuningMessage: document.querySelector("#tuningMessage"),
   stringList: document.querySelector("#stringList"),
 };
 
@@ -74,10 +74,17 @@ const analysisConfig = {
   minClarity: 0.22,
   quietMinClarity: 0.36,
   quietRms: 0.006,
-  inputGain: 3.5,
+  inputGain: 1.8,
   signalMeterFullScale: 0.08,
   highPassHz: 30,
   lowPassHz: 1600,
+  defaultPitchRange: { minFrequency: 40, maxFrequency: 1200 },
+  presetPitchRanges: {
+    chromatic: { minFrequency: 40, maxFrequency: 1200 },
+    guitar: { minFrequency: 62, maxFrequency: 420 },
+    bass: { minFrequency: 35, maxFrequency: 135 },
+    ukulele: { minFrequency: 220, maxFrequency: 520 },
+  },
   pitchHistorySize: 5,
   pitchJumpResetCents: 150,
   targetSwitchMarginCents: 12,
@@ -282,7 +289,7 @@ async function getMicrophoneStream() {
   const audioConstraints = {
     echoCancellation: false,
     noiseSuppression: false,
-    autoGainControl: true,
+    autoGainControl: false,
     channelCount: 1,
   };
 
@@ -327,7 +334,7 @@ function analyze(timestamp) {
   state.lastUpdate = timestamp;
   state.analyser.getFloatTimeDomainData(state.buffer);
 
-  const result = autoCorrelate(state.buffer, state.audioContext.sampleRate);
+  const result = autoCorrelate(state.buffer, state.audioContext.sampleRate, getPitchRange());
   updateSignalMeter(result.rms);
 
   if (!result.frequency) {
@@ -379,17 +386,13 @@ function updateReadout(frequency, timestamp, rms) {
   highlightDetectedString(target.name);
 
   const absoluteCents = Math.abs(cents);
-  elements.tuningMessage.classList.remove("is-flat", "is-sharp", "is-tuned");
 
   if (absoluteCents <= 5) {
-    elements.tuningMessage.textContent = "Accordata";
-    elements.tuningMessage.classList.add("is-tuned");
+    setGuidance("Accordata", "tuned");
   } else if (cents < 0) {
-    elements.tuningMessage.textContent = "Tendi la corda";
-    elements.tuningMessage.classList.add("is-flat");
+    setGuidance("Tendi la corda", "flat");
   } else {
-    elements.tuningMessage.textContent = "Allenta la corda";
-    elements.tuningMessage.classList.add("is-sharp");
+    setGuidance("Allenta la corda", "sharp");
   }
 }
 
@@ -409,6 +412,13 @@ function findTargetNote(frequency, referencePitch) {
   const name = `${noteNames[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`;
   const noteFrequency = referencePitch * 2 ** ((midi - 69) / 12);
   return { name, frequency: noteFrequency };
+}
+
+function getPitchRange() {
+  return (
+    analysisConfig.presetPitchRanges[elements.tuningSelect.value] ||
+    analysisConfig.defaultPitchRange
+  );
 }
 
 function stabilizeTarget(frequency, referencePitch, rms) {
@@ -499,7 +509,7 @@ function stabilizeFrequency(frequency) {
   return (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-function autoCorrelate(buffer, sampleRate) {
+function autoCorrelate(buffer, sampleRate, options = {}) {
   const size = buffer.length;
   let rms = 0;
 
@@ -532,8 +542,15 @@ function autoCorrelate(buffer, sampleRate) {
 
   const samples = buffer.slice(start, end);
   const sampleCount = samples.length;
-  const minLag = Math.floor(sampleRate / 1200);
-  const maxLag = Math.min(Math.floor(sampleRate / 40), sampleCount - 1);
+  const minFrequency = options.minFrequency || analysisConfig.defaultPitchRange.minFrequency;
+  const maxFrequency = options.maxFrequency || analysisConfig.defaultPitchRange.maxFrequency;
+  const minLag = Math.max(1, Math.floor(sampleRate / maxFrequency));
+  const maxLag = Math.min(Math.floor(sampleRate / minFrequency), sampleCount - 1);
+
+  if (maxLag <= minLag) {
+    return { frequency: null, rms, clarity: 0 };
+  }
+
   const correlations = new Float32Array(maxLag + 1);
 
   for (let lag = 0; lag <= maxLag; lag += 1) {
@@ -579,7 +596,7 @@ function autoCorrelate(buffer, sampleRate) {
   const refinedLag = bestLag + offset;
   const pitch = sampleRate / refinedLag;
 
-  if (!Number.isFinite(pitch) || pitch < 40 || pitch > 1200) {
+  if (!Number.isFinite(pitch) || pitch < minFrequency || pitch > maxFrequency) {
     return { frequency: null, rms, clarity };
   }
 
@@ -933,19 +950,6 @@ function saveTheme(theme) {
 function updateSignalMeter(rms) {
   const level = clamp((rms / analysisConfig.signalMeterFullScale) * 100, 0, 100);
   elements.signalFill.style.width = `${level}%`;
-
-  if (rms < analysisConfig.minRms) {
-    elements.signalText.textContent = state.hasReading ? "Ultima lettura" : "Basso";
-    return;
-  }
-
-  if (level > 78) {
-    elements.signalText.textContent = "Forte";
-  } else if (level > 28) {
-    elements.signalText.textContent = "Buono";
-  } else {
-    elements.signalText.textContent = "Debole";
-  }
 }
 
 function highlightDetectedString(noteName) {
@@ -981,10 +985,8 @@ function formatNoteName(noteName, includeOctave = true) {
 }
 
 function showPendingReadout() {
-  elements.tuningMessage.classList.remove("is-flat", "is-sharp", "is-tuned");
-
   if (state.hasReading) {
-    elements.tuningMessage.textContent = "Verifico il cambio nota";
+    setGuidance("Verifico cambio nota", "pending");
     return;
   }
 
@@ -993,7 +995,7 @@ function showPendingReadout() {
   elements.noteCue.classList.remove("is-live");
   updateCuePosition(null);
   elements.frequencyValue.textContent = "-- Hz";
-  elements.tuningMessage.textContent = "Verifico la nota";
+  setGuidance("Verifico la nota", "pending");
   clearDetectedString();
 }
 
@@ -1011,13 +1013,11 @@ function holdLastReadout(timestamp, rms) {
 
   const elapsed = timestamp - state.lastSignalAt;
   if (elapsed < analysisConfig.holdMs) {
-    elements.tuningMessage.textContent =
-      rms < analysisConfig.minRms ? "Ultima lettura" : "Segnale instabile";
+    setGuidance(rms < analysisConfig.minRms ? "Ultima lettura" : "Segnale instabile", "pending");
     return;
   }
 
-  elements.tuningMessage.classList.remove("is-flat", "is-sharp", "is-tuned");
-  elements.tuningMessage.textContent = "Ultima nota";
+  setGuidance("Ultima nota", "idle");
   clearDetectedString();
 }
 
@@ -1027,8 +1027,7 @@ function showIdleReadout(message) {
   elements.noteCue.classList.remove("is-live");
   updateCuePosition(null);
   elements.frequencyValue.textContent = "-- Hz";
-  elements.tuningMessage.textContent = message;
-  elements.tuningMessage.classList.remove("is-flat", "is-sharp", "is-tuned");
+  setGuidance(message, "idle");
   clearDetectedString();
 }
 
@@ -1046,7 +1045,6 @@ function resetReadout() {
   state.graphHistory = [];
   state.hasReading = false;
   elements.signalFill.style.width = "0%";
-  elements.signalText.textContent = "In attesa";
   showIdleReadout("In attesa di segnale");
   drawGraph();
 }
@@ -1108,6 +1106,14 @@ function setStatus(message, type) {
   elements.statusText.textContent = message;
   elements.statusDot.classList.toggle("is-live", type === "live");
   elements.statusDot.classList.toggle("is-error", type === "error");
+}
+
+function setGuidance(message, type = "idle") {
+  elements.signalText.textContent = message;
+  elements.signalRow.classList.toggle("is-flat", type === "flat");
+  elements.signalRow.classList.toggle("is-sharp", type === "sharp");
+  elements.signalRow.classList.toggle("is-tuned", type === "tuned");
+  elements.signalRow.classList.toggle("is-pending", type === "pending");
 }
 
 function clamp(value, min, max) {

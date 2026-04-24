@@ -258,7 +258,7 @@ button:focus-visible {
 
 .signal-row {
   display: grid;
-  grid-template-columns: auto auto auto minmax(72px, 1fr) auto;
+  grid-template-columns: auto minmax(68px, auto) auto minmax(72px, 1fr) minmax(92px, auto);
   gap: 7px;
   align-items: center;
   border: 3px solid var(--ink);
@@ -268,6 +268,32 @@ button:focus-visible {
   padding: 5px 8px;
   font-size: 0.72rem;
   font-weight: 900;
+}
+
+.signal-row.is-flat {
+  background: var(--coral);
+}
+
+.signal-row.is-sharp {
+  background: var(--amber);
+}
+
+.signal-row.is-tuned {
+  background: var(--green);
+}
+
+.signal-row.is-pending {
+  background: var(--blue);
+}
+
+#statusText,
+#signalText {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#signalText {
+  text-align: right;
 }
 
 .signal-meter {
@@ -322,7 +348,7 @@ button:focus-visible {
   --cue-x: 50%;
   position: relative;
   min-width: 0;
-  min-height: 500px;
+  min-height: clamp(410px, calc(100svh - 210px), 500px);
   overflow: hidden;
   border: 3px solid var(--ink);
   border-radius: 6px;
@@ -451,31 +477,6 @@ button:focus-visible {
   box-shadow: none;
 }
 
-.tuning-message {
-  display: block;
-  border: 3px solid var(--ink);
-  border-radius: 6px;
-  background: var(--blue);
-  color: var(--ink);
-  box-shadow: var(--shadow-small);
-  padding: 7px 10px;
-  text-align: center;
-  font-size: 0.82rem;
-  font-weight: 900;
-}
-
-.tuning-message.is-flat {
-  background: var(--coral);
-}
-
-.tuning-message.is-sharp {
-  background: var(--amber);
-}
-
-.tuning-message.is-tuned {
-  background: var(--green);
-}
-
 .string-list {
   position: absolute;
   z-index: 5;
@@ -523,6 +524,35 @@ button:focus-visible {
   display: none;
 }
 
+@media (max-width: 430px) {
+  .controls-strip {
+    grid-template-columns: 42px minmax(0, 1fr) minmax(76px, 0.8fr);
+  }
+
+  .control-field[for="referencePitch"] {
+    grid-column: 2 / -1;
+  }
+
+  .signal-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .signal-row > span:nth-of-type(2) {
+    display: none;
+  }
+
+  .signal-meter {
+    grid-column: 1 / 3;
+    grid-row: 2;
+  }
+
+  #signalText {
+    grid-column: 3;
+    grid-row: 1 / 3;
+    max-width: 112px;
+  }
+}
+
 @media (min-width: 720px) {
   .app-shell {
     width: min(1320px, calc(100% - 40px));
@@ -536,9 +566,11 @@ button:focus-visible {
   .controls-strip {
     grid-template-columns: 44px minmax(190px, 1fr) 130px 100px;
   }
+}
 
+@media (min-width: 1040px) {
   .tuner-panel {
-    grid-template-columns: minmax(220px, 0.45fr) minmax(760px, 1.55fr);
+    grid-template-columns: minmax(220px, 0.45fr) minmax(680px, 1.55fr);
     align-items: stretch;
     padding: 18px;
   }
@@ -562,9 +594,6 @@ button:focus-visible {
     margin: 0;
   }
 
-  .tuning-message {
-    grid-column: 1 / -1;
-  }
 }
 
 @media (min-width: 1400px) {
@@ -601,7 +630,7 @@ button:focus-visible {
 
   .headstock-stage {
     padding: 6px;
-    min-height: 500px;
+    min-height: clamp(390px, calc(100svh - 205px), 500px);
   }
 
   .headstock-wrap {

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
     <meta
       name="description"
@@ -69,14 +69,14 @@
           </label>
         </div>
 
-        <div class="signal-row" aria-label="Livello del segnale">
+        <div id="signalRow" class="signal-row" aria-label="Stato e livello del segnale">
           <span id="statusDot" class="status-dot"></span>
           <strong id="statusText">Pronto</strong>
           <span>Volume</span>
           <div class="signal-meter" aria-hidden="true">
             <div id="signalFill" class="signal-fill"></div>
           </div>
-          <strong id="signalText">In attesa</strong>
+          <strong id="signalText" aria-live="polite">In attesa</strong>
         </div>
 
         <section class="tuner-panel" aria-label="Indicatore di accordatura">
@@ -98,7 +98,7 @@
               height="620"
               aria-label="Grafico dello scostamento in centesimi nel tempo"
             ></canvas>
-            <div id="noteCue" class="note-cue" aria-live="polite">--</div>
+            <div id="noteCue" class="note-cue">--</div>
             <div class="headstock-wrap">
               <div class="headstock-art" aria-hidden="true">
                 <svg class="headstock-svg" viewBox="0 0 188 292" focusable="false">
@@ -127,8 +127,6 @@
               <div id="stringList" class="string-list"></div>
             </div>
           </section>
-
-          <strong id="tuningMessage" class="tuning-message">In attesa</strong>
         </section>
       </section>
     </main>
