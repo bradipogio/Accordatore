@@ -525,7 +525,7 @@ button:focus-visible {
 
 @media (min-width: 720px) {
   .app-shell {
-    width: min(1120px, calc(100% - 40px));
+    width: min(1320px, calc(100% - 40px));
     padding-top: 10px;
   }
 
@@ -538,7 +538,7 @@ button:focus-visible {
   }
 
   .tuner-panel {
-    grid-template-columns: minmax(210px, 0.55fr) minmax(340px, 1fr);
+    grid-template-columns: minmax(220px, 0.45fr) minmax(760px, 1.55fr);
     align-items: stretch;
     padding: 18px;
   }
@@ -564,6 +564,21 @@ button:focus-visible {
 
   .tuning-message {
     grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1400px) {
+  .app-shell {
+    width: min(1680px, calc(100% - 56px));
+  }
+
+  .tuner-panel {
+    grid-template-columns: minmax(240px, 0.38fr) minmax(980px, 1.8fr);
+    padding: 22px;
+  }
+
+  .headstock-stage {
+    min-height: 540px;
   }
 }
 

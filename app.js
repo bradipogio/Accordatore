@@ -81,6 +81,10 @@ const analysisConfig = {
   pitchHistorySize: 5,
   pitchJumpResetCents: 150,
   targetSwitchMarginCents: 12,
+  decaySwitchExtraMarginCents: 30,
+  decayJumpGuardCents: 170,
+  decayRmsThreshold: 0.012,
+  decayDropRatio: 0.88,
   noteConfirmationMs: 210,
   holdMs: 3200,
   centsSmoothing: 0.22,
@@ -107,6 +111,7 @@ const state = {
   pendingTargetSince: 0,
   confirmedTarget: null,
   cueCents: null,
+  lastDetectedRms: null,
   pitchHistory: [],
   graphHistory: [],
   hasReading: false,
@@ -332,12 +337,12 @@ function analyze(timestamp) {
   }
 
   state.lastSignalAt = timestamp;
-  updateReadout(stabilizeFrequency(result.frequency), timestamp);
+  updateReadout(stabilizeFrequency(result.frequency), timestamp, result.rms);
 }
 
-function updateReadout(frequency, timestamp) {
+function updateReadout(frequency, timestamp, rms) {
   const referencePitch = Number(elements.referencePitch.value) || 440;
-  const target = stabilizeTarget(frequency, referencePitch);
+  const target = stabilizeTarget(frequency, referencePitch, rms);
 
   if (!confirmStableTarget(target, timestamp)) {
     pushGraphPoint(null);
@@ -368,6 +373,7 @@ function updateReadout(frequency, timestamp) {
   state.smoothedCents = displayCents;
   state.smoothedFrequency = displayFrequency;
   state.confirmedTarget = { ...target };
+  state.lastDetectedRms = rms;
   state.hasReading = true;
   pushGraphPoint({ cents: displayCents });
   highlightDetectedString(target.name);
@@ -405,7 +411,7 @@ function findTargetNote(frequency, referencePitch) {
   return { name, frequency: noteFrequency };
 }
 
-function stabilizeTarget(frequency, referencePitch) {
+function stabilizeTarget(frequency, referencePitch, rms) {
   const candidate = findTargetNote(frequency, referencePitch);
 
   if (!state.lockedTarget || state.lockedTarget.referencePitch !== referencePitch) {
@@ -415,9 +421,19 @@ function stabilizeTarget(frequency, referencePitch) {
 
   const lockedDistance = Math.abs(1200 * Math.log2(frequency / state.lockedTarget.frequency));
   const candidateDistance = Math.abs(1200 * Math.log2(frequency / candidate.frequency));
+  const jumpFromLockedCents = Math.abs(
+    1200 * Math.log2(candidate.frequency / state.lockedTarget.frequency),
+  );
+  const isDecayPhase =
+    rms < analysisConfig.decayRmsThreshold ||
+    (state.lastDetectedRms !== null && rms < state.lastDetectedRms * analysisConfig.decayDropRatio);
+  const switchMargin =
+    analysisConfig.targetSwitchMarginCents +
+    (isDecayPhase ? analysisConfig.decaySwitchExtraMarginCents : 0);
   const shouldSwitch =
     candidate.name !== state.lockedTarget.name &&
-    candidateDistance + analysisConfig.targetSwitchMarginCents < lockedDistance;
+    candidateDistance + switchMargin < lockedDistance &&
+    (!isDecayPhase || jumpFromLockedCents <= analysisConfig.decayJumpGuardCents);
 
   if (shouldSwitch) {
     state.lockedTarget = { ...candidate, referencePitch };
@@ -578,6 +594,7 @@ function refreshPresetUi() {
   state.pendingTarget = null;
   state.pendingTargetSince = 0;
   state.confirmedTarget = null;
+  state.lastDetectedRms = null;
   updateCuePosition(null);
 }
 
@@ -984,6 +1001,7 @@ function holdLastReadout(timestamp, rms) {
   if (timestamp - state.lastSignalAt > analysisConfig.noteConfirmationMs) {
     state.pendingTarget = null;
     state.pendingTargetSince = 0;
+    state.lastDetectedRms = null;
   }
 
   if (!state.hasReading) {
@@ -1023,6 +1041,7 @@ function resetReadout() {
   state.pendingTargetSince = 0;
   state.confirmedTarget = null;
   state.cueCents = null;
+  state.lastDetectedRms = null;
   state.pitchHistory = [];
   state.graphHistory = [];
   state.hasReading = false;
