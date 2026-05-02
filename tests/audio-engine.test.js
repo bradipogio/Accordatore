@@ -145,6 +145,49 @@ function generateSine(frequency, sampleRate = 44100, size = 8192) {
   return buffer;
 }
 
+function generateHarmonicString(frequency, sampleRate = 44100, size = 8192) {
+  const buffer = new Float32Array(size);
+  const partials = [
+    { multiple: 1, amplitude: 0.16 },
+    { multiple: 2, amplitude: 0.34 },
+    { multiple: 3, amplitude: 0.22 },
+    { multiple: 4, amplitude: 0.1 },
+    { multiple: 5, amplitude: 0.06 },
+  ];
+  let seed = 54321;
+
+  for (let index = 0; index < size; index += 1) {
+    seed = (seed * 16807) % 2147483647;
+    const time = index / sampleRate;
+    const envelope = Math.exp(-time * 2.8);
+    const noise = ((seed / 2147483647) * 2 - 1) * 0.006;
+    buffer[index] =
+      partials.reduce(
+        (sum, partial) =>
+          sum +
+          partial.amplitude *
+            Math.sin((2 * Math.PI * frequency * partial.multiple * index) / sampleRate),
+        0,
+      ) *
+        envelope +
+      noise;
+  }
+
+  return buffer;
+}
+
+function generateNoise(sampleRate = 44100, size = 8192) {
+  const buffer = new Float32Array(size);
+  let seed = 9999;
+
+  for (let index = 0; index < size; index += 1) {
+    seed = (seed * 16807) % 2147483647;
+    buffer[index] = ((seed / 2147483647) * 2 - 1) * 0.06;
+  }
+
+  return buffer;
+}
+
 function expectPitch(context, frequency, range, tolerance = 0.8) {
   const result = context.autoCorrelate(generateSine(frequency), 44100, range);
   assert.ok(result.frequency, `Expected ${frequency} Hz to be detected`);
@@ -154,12 +197,32 @@ function expectPitch(context, frequency, range, tolerance = 0.8) {
   );
 }
 
+function expectStringPitch(context, frequency, range, tolerance = 0.9) {
+  const result = context.autoCorrelate(generateHarmonicString(frequency), 44100, range);
+  assert.ok(result.frequency, `Expected string-like ${frequency} Hz to be detected`);
+  assert.ok(
+    Math.abs(result.frequency - frequency) <= tolerance,
+    `Expected string-like ${frequency} Hz, got ${result.frequency}`,
+  );
+}
+
 const { context, nodes } = createHarness();
 
+assert.equal(
+  context.autoCorrelate(generateNoise(), 44100, { minFrequency: 55, maxFrequency: 420 })
+    .frequency,
+  null,
+);
+
+expectPitch(context, 35, { minFrequency: 30, maxFrequency: 150 }, 0.5);
 expectPitch(context, 41.2, { minFrequency: 35, maxFrequency: 135 }, 0.5);
 expectPitch(context, 82.41, { minFrequency: 62, maxFrequency: 420 }, 0.5);
 expectPitch(context, 110, { minFrequency: 62, maxFrequency: 420 }, 0.5);
 expectPitch(context, 440, { minFrequency: 220, maxFrequency: 520 }, 0.8);
+expectStringPitch(context, 41.2, { minFrequency: 30, maxFrequency: 150 }, 0.7);
+expectStringPitch(context, 82.41, { minFrequency: 55, maxFrequency: 420 }, 0.7);
+expectStringPitch(context, 110, { minFrequency: 55, maxFrequency: 420 }, 0.7);
+expectStringPitch(context, 196, { minFrequency: 55, maxFrequency: 420 }, 0.8);
 
 nodes["#tuningSelect"].value = "bass";
 assert.equal(context.findTargetNote(41.2, 440).name, "E1");

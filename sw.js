@@ -1,4 +1,4 @@
-const CACHE_NAME = "accordatore-v19";
+const CACHE_NAME = "accordatore-v20";
 const ASSETS = [
   "./",
   "./index.html",

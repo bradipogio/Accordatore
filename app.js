@@ -71,28 +71,31 @@ const elements = {
 const analysisConfig = {
   updateIntervalMs: 70,
   minRms: 0.0016,
-  minClarity: 0.22,
-  quietMinClarity: 0.36,
+  minClarity: 0.76,
+  quietMinClarity: 0.84,
   quietRms: 0.006,
   inputGain: 1.8,
   signalMeterFullScale: 0.08,
-  highPassHz: 30,
-  lowPassHz: 1600,
-  defaultPitchRange: { minFrequency: 40, maxFrequency: 1200 },
+  highPassHz: 24,
+  lowPassHz: 1800,
+  defaultPitchRange: { minFrequency: 32, maxFrequency: 1200 },
   presetPitchRanges: {
-    chromatic: { minFrequency: 40, maxFrequency: 1200 },
-    guitar: { minFrequency: 62, maxFrequency: 420 },
-    bass: { minFrequency: 35, maxFrequency: 135 },
-    ukulele: { minFrequency: 220, maxFrequency: 520 },
+    chromatic: { minFrequency: 32, maxFrequency: 1200 },
+    guitar: { minFrequency: 55, maxFrequency: 420 },
+    bass: { minFrequency: 30, maxFrequency: 150 },
+    ukulele: { minFrequency: 190, maxFrequency: 560 },
   },
-  pitchHistorySize: 5,
-  pitchJumpResetCents: 150,
+  yinThreshold: 0.18,
+  quietYinThreshold: 0.12,
+  pitchHistorySize: 7,
+  pitchJumpResetCents: 220,
+  pitchOutlierToleranceCents: 42,
   targetSwitchMarginCents: 12,
   decaySwitchExtraMarginCents: 30,
   decayJumpGuardCents: 170,
   decayRmsThreshold: 0.012,
   decayDropRatio: 0.88,
-  noteConfirmationMs: 210,
+  noteConfirmationMs: 240,
   holdMs: 3200,
   centsSmoothing: 0.22,
   frequencySmoothing: 0.3,
@@ -344,7 +347,11 @@ function analyze(timestamp) {
   }
 
   state.lastSignalAt = timestamp;
-  updateReadout(stabilizeFrequency(result.frequency), timestamp, result.rms);
+  updateReadout(
+    stabilizeFrequency(result.frequency, result.clarity, result.rms),
+    timestamp,
+    result.rms,
+  );
 }
 
 function updateReadout(frequency, timestamp, rms) {
@@ -484,8 +491,9 @@ function isSameTarget(target, otherTarget) {
   );
 }
 
-function stabilizeFrequency(frequency) {
-  const lastFrequency = state.pitchHistory[state.pitchHistory.length - 1];
+function stabilizeFrequency(frequency, clarity = 1, rms = 0) {
+  const lastSample = state.pitchHistory[state.pitchHistory.length - 1];
+  const lastFrequency = lastSample?.frequency;
   if (lastFrequency) {
     const jumpCents = Math.abs(1200 * Math.log2(frequency / lastFrequency));
     if (jumpCents > analysisConfig.pitchJumpResetCents) {
@@ -493,28 +501,56 @@ function stabilizeFrequency(frequency) {
     }
   }
 
-  state.pitchHistory.push(frequency);
+  state.pitchHistory.push({ frequency, clarity, rms });
 
   if (state.pitchHistory.length > analysisConfig.pitchHistorySize) {
     state.pitchHistory.shift();
   }
 
-  const sorted = [...state.pitchHistory].sort((a, b) => a - b);
+  const sorted = state.pitchHistory.map((sample) => sample.frequency).sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  const filtered = state.pitchHistory.filter(
+    (sample) =>
+      Math.abs(1200 * Math.log2(sample.frequency / median)) <=
+      analysisConfig.pitchOutlierToleranceCents,
+  );
+  const usableSamples = filtered.length ? filtered : state.pitchHistory;
+  let weightedLogFrequency = 0;
+  let totalWeight = 0;
 
-  if (sorted.length % 2) {
-    return sorted[middle];
-  }
+  usableSamples.forEach((sample) => {
+    const weight = getPitchSampleWeight(sample);
+    weightedLogFrequency += Math.log(sample.frequency) * weight;
+    totalWeight += weight;
+  });
 
-  return (sorted[middle - 1] + sorted[middle]) / 2;
+  return totalWeight > 0 ? Math.exp(weightedLogFrequency / totalWeight) : median;
+}
+
+function getPitchSampleWeight(sample) {
+  const clarityWeight = clamp(sample.clarity || 0.01, 0.01, 1) ** 2;
+  const levelWeight = clamp(sample.rms / analysisConfig.quietRms, 0.35, 1.6);
+  return clarityWeight * levelWeight;
 }
 
 function autoCorrelate(buffer, sampleRate, options = {}) {
   const size = buffer.length;
+  let mean = 0;
+
+  for (let index = 0; index < size; index += 1) {
+    mean += buffer[index];
+  }
+
+  mean /= size;
+
+  const samples = new Float32Array(size);
   let rms = 0;
 
   for (let index = 0; index < size; index += 1) {
-    rms += buffer[index] * buffer[index];
+    const value = buffer[index] - mean;
+    samples[index] = value;
+    rms += value * value;
   }
 
   rms = Math.sqrt(rms / size);
@@ -522,65 +558,43 @@ function autoCorrelate(buffer, sampleRate, options = {}) {
     return { frequency: null, rms, clarity: 0 };
   }
 
-  let start = 0;
-  let end = size - 1;
-  const edgeThreshold = 0.18;
-
-  for (let index = 0; index < size / 2; index += 1) {
-    if (Math.abs(buffer[index]) < edgeThreshold) {
-      start = index;
-      break;
-    }
-  }
-
-  for (let index = 1; index < size / 2; index += 1) {
-    if (Math.abs(buffer[size - index]) < edgeThreshold) {
-      end = size - index;
-      break;
-    }
-  }
-
-  const samples = buffer.slice(start, end);
-  const sampleCount = samples.length;
   const minFrequency = options.minFrequency || analysisConfig.defaultPitchRange.minFrequency;
   const maxFrequency = options.maxFrequency || analysisConfig.defaultPitchRange.maxFrequency;
-  const minLag = Math.max(1, Math.floor(sampleRate / maxFrequency));
-  const maxLag = Math.min(Math.floor(sampleRate / minFrequency), sampleCount - 1);
+  const minLag = Math.max(2, Math.floor(sampleRate / maxFrequency));
+  const maxLag = Math.min(Math.ceil(sampleRate / minFrequency), size - 2);
 
   if (maxLag <= minLag) {
     return { frequency: null, rms, clarity: 0 };
   }
 
-  const correlations = new Float32Array(maxLag + 1);
+  const yinBuffer = new Float32Array(maxLag + 1);
+  yinBuffer[0] = 1;
+  let runningDifference = 0;
 
-  for (let lag = 0; lag <= maxLag; lag += 1) {
-    let correlation = 0;
-    for (let index = 0; index < sampleCount - lag; index += 1) {
-      correlation += samples[index] * samples[index + lag];
+  for (let lag = 1; lag <= maxLag; lag += 1) {
+    let difference = 0;
+    const comparisonSize = size - lag;
+
+    for (let index = 0; index < comparisonSize; index += 1) {
+      const delta = samples[index] - samples[index + lag];
+      difference += delta * delta;
     }
-    correlations[lag] = correlation;
+
+    runningDifference += difference;
+    yinBuffer[lag] = runningDifference > 0 ? (difference * lag) / runningDifference : 1;
   }
 
-  let lag = 1;
-  while (lag < maxLag - 1 && correlations[lag] > correlations[lag + 1]) {
-    lag += 1;
-  }
+  const yinThreshold =
+    rms < analysisConfig.quietRms
+      ? analysisConfig.quietYinThreshold
+      : analysisConfig.yinThreshold;
+  const candidate = findYinCandidate(yinBuffer, minLag, maxLag, yinThreshold);
 
-  let bestLag = lag;
-  let bestCorrelation = -Infinity;
-
-  for (let index = Math.max(lag, minLag); index <= maxLag; index += 1) {
-    if (correlations[index] > bestCorrelation) {
-      bestCorrelation = correlations[index];
-      bestLag = index;
-    }
-  }
-
-  if (bestLag <= 0 || correlations[0] <= 0) {
+  if (!candidate) {
     return { frequency: null, rms, clarity: 0 };
   }
 
-  const clarity = bestCorrelation / correlations[0];
+  const clarity = clamp(1 - candidate.value, 0, 1);
   const minClarity =
     rms < analysisConfig.quietRms ? analysisConfig.quietMinClarity : analysisConfig.minClarity;
 
@@ -588,12 +602,7 @@ function autoCorrelate(buffer, sampleRate, options = {}) {
     return { frequency: null, rms, clarity };
   }
 
-  const previous = correlations[bestLag - 1] || 0;
-  const current = correlations[bestLag];
-  const next = correlations[bestLag + 1] || 0;
-  const divisor = previous + next - 2 * current;
-  const offset = divisor ? (previous - next) / (2 * divisor) : 0;
-  const refinedLag = bestLag + offset;
+  const refinedLag = refineYinLag(yinBuffer, candidate.lag, maxLag);
   const pitch = sampleRate / refinedLag;
 
   if (!Number.isFinite(pitch) || pitch < minFrequency || pitch > maxFrequency) {
@@ -601,6 +610,53 @@ function autoCorrelate(buffer, sampleRate, options = {}) {
   }
 
   return { frequency: pitch, rms, clarity };
+}
+
+function findYinCandidate(yinBuffer, minLag, maxLag, threshold) {
+  let bestLag = 0;
+  let bestValue = Infinity;
+
+  for (let lag = minLag; lag <= maxLag; lag += 1) {
+    const value = yinBuffer[lag];
+
+    if (value < bestValue) {
+      bestValue = value;
+      bestLag = lag;
+    }
+
+    if (value < threshold) {
+      while (lag + 1 <= maxLag && yinBuffer[lag + 1] < yinBuffer[lag]) {
+        lag += 1;
+      }
+
+      return { lag, value: yinBuffer[lag] };
+    }
+  }
+
+  const fallbackTolerance = Math.min(0.05, Math.max(0.015, bestValue * 0.25));
+  for (let lag = minLag + 1; lag < maxLag; lag += 1) {
+    const value = yinBuffer[lag];
+    const isLocalMinimum = value <= yinBuffer[lag - 1] && value <= yinBuffer[lag + 1];
+
+    if (isLocalMinimum && value <= bestValue + fallbackTolerance) {
+      return { lag, value };
+    }
+  }
+
+  return bestLag ? { lag: bestLag, value: bestValue } : null;
+}
+
+function refineYinLag(yinBuffer, lag, maxLag) {
+  if (lag <= 0 || lag >= maxLag) {
+    return lag;
+  }
+
+  const previous = yinBuffer[lag - 1];
+  const current = yinBuffer[lag];
+  const next = yinBuffer[lag + 1];
+  const denominator = previous - 2 * current + next;
+  const offset = denominator ? (0.5 * (previous - next)) / denominator : 0;
+  return lag + clamp(offset, -1, 1);
 }
 
 function refreshPresetUi() {
