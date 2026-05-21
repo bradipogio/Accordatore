@@ -90,6 +90,8 @@ const analysisConfig = {
   pitchHistorySize: 7,
   pitchJumpResetCents: 220,
   pitchOutlierToleranceCents: 42,
+  targetForceSwitchCents: 260,
+  targetReleaseMs: 480,
   targetSwitchMarginCents: 12,
   decaySwitchExtraMarginCents: 30,
   decayJumpGuardCents: 170,
@@ -122,6 +124,7 @@ const state = {
   confirmedTarget: null,
   cueCents: null,
   lastDetectedRms: null,
+  lastPitchJumpCents: 0,
   pitchHistory: [],
   graphHistory: [],
   hasReading: false,
@@ -356,11 +359,13 @@ function analyze(timestamp) {
 
 function updateReadout(frequency, timestamp, rms) {
   const referencePitch = Number(elements.referencePitch.value) || 440;
-  const target = stabilizeTarget(frequency, referencePitch, rms);
+  const previousDetectedRms = state.lastDetectedRms;
+  state.lastDetectedRms = rms;
+  const target = stabilizeTarget(frequency, referencePitch, rms, previousDetectedRms);
 
   if (!confirmStableTarget(target, timestamp)) {
     pushGraphPoint(null);
-    showPendingReadout();
+    showPendingReadout(target, frequency);
     return;
   }
 
@@ -387,7 +392,6 @@ function updateReadout(frequency, timestamp, rms) {
   state.smoothedCents = displayCents;
   state.smoothedFrequency = displayFrequency;
   state.confirmedTarget = { ...target };
-  state.lastDetectedRms = rms;
   state.hasReading = true;
   pushGraphPoint({ cents: displayCents });
   highlightDetectedString(target.name);
@@ -428,7 +432,7 @@ function getPitchRange() {
   );
 }
 
-function stabilizeTarget(frequency, referencePitch, rms) {
+function stabilizeTarget(frequency, referencePitch, rms, previousRms = state.lastDetectedRms) {
   const candidate = findTargetNote(frequency, referencePitch);
 
   if (!state.lockedTarget || state.lockedTarget.referencePitch !== referencePitch) {
@@ -443,14 +447,17 @@ function stabilizeTarget(frequency, referencePitch, rms) {
   );
   const isDecayPhase =
     rms < analysisConfig.decayRmsThreshold ||
-    (state.lastDetectedRms !== null && rms < state.lastDetectedRms * analysisConfig.decayDropRatio);
+    (previousRms !== null && rms < previousRms * analysisConfig.decayDropRatio);
+  const isClearPitchMove = state.lastPitchJumpCents >= analysisConfig.targetForceSwitchCents;
   const switchMargin =
     analysisConfig.targetSwitchMarginCents +
     (isDecayPhase ? analysisConfig.decaySwitchExtraMarginCents : 0);
   const shouldSwitch =
     candidate.name !== state.lockedTarget.name &&
     candidateDistance + switchMargin < lockedDistance &&
-    (!isDecayPhase || jumpFromLockedCents <= analysisConfig.decayJumpGuardCents);
+    (!isDecayPhase ||
+      jumpFromLockedCents <= analysisConfig.decayJumpGuardCents ||
+      isClearPitchMove);
 
   if (shouldSwitch) {
     state.lockedTarget = { ...candidate, referencePitch };
@@ -492,10 +499,13 @@ function isSameTarget(target, otherTarget) {
 }
 
 function stabilizeFrequency(frequency, clarity = 1, rms = 0) {
+  state.lastPitchJumpCents = 0;
   const lastSample = state.pitchHistory[state.pitchHistory.length - 1];
   const lastFrequency = lastSample?.frequency;
   if (lastFrequency) {
     const jumpCents = Math.abs(1200 * Math.log2(frequency / lastFrequency));
+    state.lastPitchJumpCents = jumpCents;
+
     if (jumpCents > analysisConfig.pitchJumpResetCents) {
       state.pitchHistory = [];
     }
@@ -668,6 +678,7 @@ function refreshPresetUi() {
   state.pendingTargetSince = 0;
   state.confirmedTarget = null;
   state.lastDetectedRms = null;
+  state.lastPitchJumpCents = 0;
   updateCuePosition(null);
 }
 
@@ -1040,9 +1051,20 @@ function formatNoteName(noteName, includeOctave = true) {
   return includeOctave && match[2] ? `${baseName}${match[2]}` : baseName;
 }
 
-function showPendingReadout() {
-  if (state.hasReading) {
-    setGuidance("Verifico cambio nota", "pending");
+function showPendingReadout(target = null, frequency = null) {
+  if (target) {
+    elements.noteName.textContent = formatNoteName(target.name);
+    elements.noteCue.textContent = "--";
+    elements.noteCue.classList.remove("is-live");
+    updateCuePosition(null);
+    elements.frequencyValue.textContent = Number.isFinite(frequency)
+      ? `${frequency.toFixed(1)} Hz`
+      : "-- Hz";
+    setGuidance(
+      state.hasReading ? "Verifico cambio nota" : "Verifico la nota",
+      "pending",
+    );
+    clearDetectedString();
     return;
   }
 
@@ -1060,6 +1082,12 @@ function holdLastReadout(timestamp, rms) {
     state.pendingTarget = null;
     state.pendingTargetSince = 0;
     state.lastDetectedRms = null;
+  }
+
+  if (timestamp - state.lastSignalAt > analysisConfig.targetReleaseMs) {
+    state.lockedTarget = null;
+    state.pitchHistory = [];
+    state.lastPitchJumpCents = 0;
   }
 
   if (!state.hasReading) {
@@ -1097,6 +1125,7 @@ function resetReadout() {
   state.confirmedTarget = null;
   state.cueCents = null;
   state.lastDetectedRms = null;
+  state.lastPitchJumpCents = 0;
   state.pitchHistory = [];
   state.graphHistory = [];
   state.hasReading = false;

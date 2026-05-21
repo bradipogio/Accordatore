@@ -206,6 +206,11 @@ function expectStringPitch(context, frequency, range, tolerance = 0.9) {
   );
 }
 
+function detectFrame(context, frequency, timestamp, rms = 0.08, clarity = 0.98) {
+  const stableFrequency = context.stabilizeFrequency(frequency, clarity, rms);
+  context.updateReadout(stableFrequency, timestamp, rms);
+}
+
 const { context, nodes } = createHarness();
 
 assert.equal(
@@ -233,5 +238,15 @@ assert.equal(context.findTargetNote(110, 440).name, "A2");
 
 nodes["#tuningSelect"].value = "chromatic";
 assert.equal(context.findTargetNote(440, 440).name, "A4");
+
+nodes["#tuningSelect"].value = "guitar";
+context.resetReadout();
+detectFrame(context, 82.41, 0, 0.12);
+detectFrame(context, 82.41, 300, 0.12);
+assert.equal(nodes["#noteName"].textContent, "Mi2");
+detectFrame(context, 110, 370, 0.07);
+assert.equal(nodes["#noteName"].textContent, "La2");
+detectFrame(context, 110, 650, 0.07);
+assert.equal(nodes["#noteName"].textContent, "La2");
 
 console.log("audio-engine: ok");
