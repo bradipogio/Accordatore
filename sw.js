@@ -1,9 +1,9 @@
-const CACHE_NAME = "accordatore-v21";
+const CACHE_NAME = "accordatore-v36";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css",
-  "./app.js",
+  "./styles.css?v=36",
+  "./app.js?v=36",
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./assets/icon-180.png",
@@ -33,6 +33,26 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request)),
+    fetch(event.request)
+      .then((response) => {
+        if (!response.ok || new URL(event.request.url).origin !== self.location.origin) {
+          return response;
+        }
+
+        const cachedResponse = response.clone();
+        const cacheKey = event.request.mode === "navigate" ? "./index.html" : event.request;
+        return caches
+          .open(CACHE_NAME)
+          .then((cache) => cache.put(cacheKey, cachedResponse))
+          .catch(() => {
+            // A failed cache write must not block the online response.
+          })
+          .then(() => response);
+      })
+      .catch(() =>
+        event.request.mode === "navigate"
+          ? caches.match("./index.html")
+          : caches.match(event.request),
+      ),
   );
 });

@@ -19,25 +19,30 @@
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="assets/icon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="assets/icon-180.png" />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=36" />
   </head>
   <body>
     <main class="app-shell">
       <section class="tuner-section" aria-labelledby="app-title">
         <header class="app-header">
-          <h1 id="app-title">Accordatore</h1>
-        </header>
-
-        <div class="controls-strip" aria-label="Controlli accordatore">
+          <div class="brand-block">
+            <span class="eyebrow">Accordatore cromatico</span>
+            <h1 id="app-title">Accordatore</h1>
+          </div>
           <button
             id="startButton"
             class="primary-button mic-button"
             type="button"
             aria-label="Avvia microfono"
+            aria-pressed="false"
             title="Avvia microfono"
           >
             <span class="mic-icon" aria-hidden="true"></span>
+            <span id="micButtonLabel">Avvia</span>
           </button>
+        </header>
+
+        <div class="controls-strip" aria-label="Impostazioni accordatore">
           <label class="control-field" for="tuningSelect">
             <span>Strumento</span>
             <select id="tuningSelect">
@@ -48,7 +53,7 @@
             </select>
           </label>
           <label class="control-field" for="skinSelect">
-            <span>Skin</span>
+            <span>Aspetto</span>
             <select id="skinSelect">
               <option value="brutal" selected>Brutal</option>
               <option value="neon">Neon</option>
@@ -56,7 +61,7 @@
             </select>
           </label>
           <label class="control-field" for="referencePitch">
-            <span>La</span>
+            <span>La (Hz)</span>
             <input
               id="referencePitch"
               type="number"
@@ -70,26 +75,56 @@
         </div>
 
         <div id="signalRow" class="signal-row" aria-label="Stato e livello del segnale">
-          <span id="statusDot" class="status-dot"></span>
-          <strong id="statusText">Pronto</strong>
-          <span>Volume</span>
-          <div class="signal-meter" aria-hidden="true">
-            <div id="signalFill" class="signal-fill"></div>
+          <div class="status-summary">
+            <span id="statusDot" class="status-dot" aria-hidden="true"></span>
+            <div>
+              <span class="status-label">Microfono</span>
+              <strong id="statusText">Pronto</strong>
+            </div>
           </div>
-          <strong id="signalText" aria-live="polite">In attesa</strong>
+          <div class="level-summary">
+            <span class="status-label">Livello ingresso</span>
+            <div
+              id="signalMeter"
+              class="signal-meter"
+              role="meter"
+              aria-label="Livello del segnale"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+            >
+              <div id="signalFill" class="signal-fill"></div>
+            </div>
+          </div>
+          <strong id="signalText" class="guidance-chip" aria-live="polite">In attesa</strong>
         </div>
 
         <section class="tuner-panel" aria-label="Indicatore di accordatura">
           <div class="readout">
-            <p id="noteName" class="note-name">--</p>
-            <p id="frequencyValue" class="frequency-value">-- Hz</p>
+            <span id="readoutLabel" class="readout-label">Nota rilevata</span>
+            <button
+              id="autoModeButton"
+              class="target-mode-button"
+              type="button"
+              aria-label="Usa la selezione automatica della corda"
+              aria-pressed="true"
+              title="Usa la selezione automatica della corda"
+            >
+              <span class="auto-indicator" aria-hidden="true"></span>
+              Auto
+            </button>
+            <div class="readout-values">
+              <p id="noteName" class="note-name is-placeholder">—</p>
+              <p id="frequencyValue" class="frequency-value">— Hz</p>
+            </div>
+            <p id="targetHint" class="readout-hint">Tocca una corda per bloccarla</p>
           </div>
 
           <section class="headstock-stage" aria-label="Grafico e paletta delle note">
             <div class="graph-labels" aria-hidden="true">
-              <span>Bassa</span>
-              <strong>0 cent</strong>
-              <span>Alta</span>
+              <span>Calante</span>
+              <strong>Accordata</strong>
+              <span>Crescente</span>
             </div>
             <canvas
               id="intonationCanvas"
@@ -98,7 +133,7 @@
               height="620"
               aria-label="Grafico dello scostamento in centesimi nel tempo"
             ></canvas>
-            <div id="noteCue" class="note-cue">--</div>
+            <span id="noteCue" hidden>—</span>
             <div class="headstock-wrap">
               <div class="headstock-art" aria-hidden="true">
                 <svg class="headstock-svg" viewBox="0 0 188 292" focusable="false">
@@ -131,6 +166,6 @@
       </section>
     </main>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=36"></script>
   </body>
 </html>

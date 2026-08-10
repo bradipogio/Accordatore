@@ -59,6 +59,7 @@ const elements = {
   statusDot: document.querySelector("#statusDot"),
   statusText: document.querySelector("#statusText"),
   signalFill: document.querySelector("#signalFill"),
+  signalMeter: document.querySelector("#signalMeter"),
   signalText: document.querySelector("#signalText"),
   intonationCanvas: document.querySelector("#intonationCanvas"),
   headstockStage: document.querySelector(".headstock-stage"),
@@ -66,10 +67,14 @@ const elements = {
   noteCue: document.querySelector("#noteCue"),
   frequencyValue: document.querySelector("#frequencyValue"),
   stringList: document.querySelector("#stringList"),
+  micButtonLabel: document.querySelector("#micButtonLabel"),
+  autoModeButton: document.querySelector("#autoModeButton"),
+  targetHint: document.querySelector("#targetHint"),
+  readoutLabel: document.querySelector("#readoutLabel"),
 };
 
 const analysisConfig = {
-  updateIntervalMs: 70,
+  updateIntervalMs: 60,
   minRms: 0.0016,
   minClarity: 0.76,
   quietMinClarity: 0.84,
@@ -87,20 +92,22 @@ const analysisConfig = {
   },
   yinThreshold: 0.18,
   quietYinThreshold: 0.12,
-  pitchHistorySize: 7,
+  pitchHistorySize: 5,
   pitchJumpResetCents: 220,
   pitchOutlierToleranceCents: 42,
   targetForceSwitchCents: 260,
-  targetReleaseMs: 480,
+  targetReleaseMs: 360,
   targetSwitchMarginCents: 12,
   decaySwitchExtraMarginCents: 30,
   decayJumpGuardCents: 170,
   decayRmsThreshold: 0.012,
   decayDropRatio: 0.88,
-  noteConfirmationMs: 240,
-  holdMs: 3200,
-  centsSmoothing: 0.22,
-  frequencySmoothing: 0.3,
+  noteConfirmationMs: 180,
+  holdMs: 1200,
+  centsSmoothingBase: 0.32,
+  centsSmoothingFast: 0.62,
+  centsFastThreshold: 9,
+  frequencySmoothing: 0.45,
   maxHistoryPoints: 96,
 };
 
@@ -123,13 +130,16 @@ const state = {
   pendingTargetSince: 0,
   confirmedTarget: null,
   cueCents: null,
+  cueLive: false,
   lastDetectedRms: null,
   lastPitchJumpCents: 0,
   pitchHistory: [],
   graphHistory: [],
   hasReading: false,
   listening: false,
+  starting: false,
   resumeWhenVisible: false,
+  manualTargetName: null,
 };
 
 const graph = {
@@ -143,19 +153,31 @@ const graphConfig = {
   cursorRatio: 0.24,
 };
 
+restorePreferences();
 setupGraphCanvas();
 refreshPresetUi();
-restoreTheme();
+applyTheme(elements.skinSelect.value);
 registerServiceWorker();
 
 elements.startButton.addEventListener("click", toggleMicrophone);
-elements.tuningSelect.addEventListener("change", refreshPresetUi);
+elements.tuningSelect.addEventListener("change", () => {
+  savePreference("accordatore-tuning", elements.tuningSelect.value);
+  refreshPresetUi(true);
+});
+elements.autoModeButton.addEventListener("click", enableAutomaticTarget);
 elements.skinSelect.addEventListener("change", () => {
   applyTheme(elements.skinSelect.value);
 });
 elements.referencePitch.addEventListener("change", () => {
   normalizeReferencePitch();
+  savePreference("accordatore-reference", elements.referencePitch.value);
   refreshPresetUi();
+});
+elements.referencePitch.addEventListener("input", () => {
+  const value = Number(elements.referencePitch.value);
+  if (Number.isFinite(value) && value >= 400 && value <= 480) {
+    savePreference("accordatore-reference", elements.referencePitch.value);
+  }
 });
 document.addEventListener("visibilitychange", handleVisibilityChange);
 window.addEventListener("pagehide", (event) => {
@@ -169,10 +191,17 @@ window.addEventListener("pagehide", (event) => {
 window.addEventListener("freeze", parkMicrophoneForBackground);
 
 async function toggleMicrophone() {
+  if (state.starting) {
+    return;
+  }
+
   if (state.listening) {
     pauseListening();
     return;
   }
+
+  state.starting = true;
+  setMicrophoneLoadingState(true);
 
   try {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -200,6 +229,9 @@ async function toggleMicrophone() {
         ? "Permesso microfono negato."
         : "Microfono non disponibile in questo browser.";
     setStatus(message, "error");
+  } finally {
+    state.starting = false;
+    setMicrophoneLoadingState(false);
   }
 }
 
@@ -315,7 +347,7 @@ async function ensureAudioContext() {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     state.audioContext = new AudioContext();
     state.analyser = state.audioContext.createAnalyser();
-    state.analyser.fftSize = 8192;
+    state.analyser.fftSize = 4096;
     state.analyser.smoothingTimeConstant = 0;
     state.buffer = new Float32Array(state.analyser.fftSize);
   }
@@ -344,8 +376,8 @@ function analyze(timestamp) {
   updateSignalMeter(result.rms);
 
   if (!result.frequency) {
-    pushGraphPoint(null);
     holdLastReadout(timestamp, result.rms);
+    pushGraphPoint(null);
     return;
   }
 
@@ -364,8 +396,8 @@ function updateReadout(frequency, timestamp, rms) {
   const target = stabilizeTarget(frequency, referencePitch, rms, previousDetectedRms);
 
   if (!confirmStableTarget(target, timestamp)) {
-    pushGraphPoint(null);
     showPendingReadout(target, frequency);
+    pushGraphPoint(null);
     return;
   }
 
@@ -377,16 +409,19 @@ function updateReadout(frequency, timestamp, rms) {
 
   const cents = 1200 * Math.log2(frequency / target.frequency);
   const clampedCents = clamp(cents, -50, 50);
+  const centsSmoothing = getCentsSmoothing(clampedCents, state.smoothedCents);
   const displayCents = state.hasReading
-    ? state.smoothedCents + (clampedCents - state.smoothedCents) * analysisConfig.centsSmoothing
+    ? state.smoothedCents + (clampedCents - state.smoothedCents) * centsSmoothing
     : clampedCents;
   const displayFrequency = state.smoothedFrequency
     ? state.smoothedFrequency + (frequency - state.smoothedFrequency) * analysisConfig.frequencySmoothing
     : frequency;
 
   elements.noteName.textContent = formatNoteName(target.name);
+  elements.noteName.classList.remove("is-placeholder");
   elements.noteCue.textContent = formatCueCents(displayCents);
   elements.noteCue.classList.add("is-live");
+  state.cueLive = true;
   updateCuePosition(displayCents);
   elements.frequencyValue.textContent = `${displayFrequency.toFixed(1)} Hz`;
   state.smoothedCents = displayCents;
@@ -394,17 +429,33 @@ function updateReadout(frequency, timestamp, rms) {
   state.confirmedTarget = { ...target };
   state.hasReading = true;
   pushGraphPoint({ cents: displayCents });
-  highlightDetectedString(target.name);
+  highlightDetectedString(target.name, Math.abs(cents) <= 50);
 
   const absoluteCents = Math.abs(cents);
 
   if (absoluteCents <= 5) {
     setGuidance("Accordata", "tuned");
   } else if (cents < 0) {
-    setGuidance("Tendi la corda", "flat");
+    setGuidance(
+      elements.tuningSelect.value === "chromatic" ? "Nota troppo bassa" : "Tendi la corda",
+      "flat",
+    );
   } else {
-    setGuidance("Allenta la corda", "sharp");
+    setGuidance(
+      elements.tuningSelect.value === "chromatic" ? "Nota troppo alta" : "Allenta la corda",
+      "sharp",
+    );
   }
+}
+
+function getCentsSmoothing(nextCents, previousCents) {
+  if (!Number.isFinite(previousCents)) {
+    return 1;
+  }
+
+  return Math.abs(nextCents - previousCents) >= analysisConfig.centsFastThreshold
+    ? analysisConfig.centsSmoothingFast
+    : analysisConfig.centsSmoothingBase;
 }
 
 function findTargetNote(frequency, referencePitch) {
@@ -412,6 +463,12 @@ function findTargetNote(frequency, referencePitch) {
 
   if (selectedTuning.notes.length) {
     const presetNotes = getScaledPresetNotes(selectedTuning.notes, referencePitch);
+    const manualTarget = presetNotes.find((note) => note.name === state.manualTargetName);
+
+    if (manualTarget) {
+      return manualTarget;
+    }
+
     return presetNotes.reduce((closest, note) => {
       const closestDistance = Math.abs(1200 * Math.log2(frequency / closest.frequency));
       const noteDistance = Math.abs(1200 * Math.log2(frequency / note.frequency));
@@ -669,17 +726,14 @@ function refineYinLag(yinBuffer, lag, maxLag) {
   return lag + clamp(offset, -1, 1);
 }
 
-function refreshPresetUi() {
+function refreshPresetUi(resetTargetMode = false) {
+  if (resetTargetMode) {
+    state.manualTargetName = null;
+  }
+
   renderStringList();
-  clearDetectedString();
-  state.lockedTarget = null;
-  state.pitchHistory = [];
-  state.pendingTarget = null;
-  state.pendingTargetSince = 0;
-  state.confirmedTarget = null;
-  state.lastDetectedRms = null;
-  state.lastPitchJumpCents = 0;
-  updateCuePosition(null);
+  updateTargetModeUi();
+  resetReadout();
 }
 
 function renderStringList() {
@@ -688,23 +742,9 @@ function renderStringList() {
   elements.headstockStage.dataset.tuning = elements.tuningSelect.value;
   elements.headstockStage.dataset.stringCount = String(selectedTuning.notes.length || 0);
 
-  const notes =
-    selectedTuning.notes.length > 0
-      ? getScaledPresetNotes(selectedTuning.notes, getReferencePitch())
-      : [
-          { name: "C", frequency: null },
-          { name: "C#", frequency: null },
-          { name: "D", frequency: null },
-          { name: "D#", frequency: null },
-          { name: "E", frequency: null },
-          { name: "F", frequency: null },
-          { name: "F#", frequency: null },
-          { name: "G", frequency: null },
-          { name: "G#", frequency: null },
-          { name: "A", frequency: null },
-          { name: "A#", frequency: null },
-          { name: "B", frequency: null },
-        ];
+  const notes = selectedTuning.notes.length
+    ? getScaledPresetNotes(selectedTuning.notes, getReferencePitch())
+    : [];
 
   if (!selectedTuning.notes.length) {
     return;
@@ -712,14 +752,13 @@ function renderStringList() {
 
   notes.forEach((note, noteIndex) => {
     const pegPosition = getPegPosition(noteIndex, notes.length);
-    const pill = document.createElement("div");
+    const pill = document.createElement("button");
+    pill.type = "button";
     pill.className = "string-pill";
     pill.dataset.note = note.name;
     pill.style.setProperty("--pill-x", `${pegPosition.x}px`);
     pill.style.setProperty("--pill-y", `${pegPosition.y}px`);
-    pill.setAttribute("aria-label", `${formatNoteName(note.name)} ${
-      note.frequency ? `${note.frequency.toFixed(2)} Hz` : "tutte le ottave"
-    }`);
+    pill.addEventListener("click", () => toggleManualTarget(note.name));
 
     const name = document.createElement("strong");
     name.textContent = formatNoteName(note.name, false);
@@ -729,6 +768,69 @@ function renderStringList() {
 
     pill.append(name, frequency);
     elements.stringList.append(pill);
+  });
+}
+
+function toggleManualTarget(noteName) {
+  if (state.manualTargetName === noteName) {
+    enableAutomaticTarget();
+    return;
+  }
+
+  selectManualTarget(noteName);
+}
+
+function selectManualTarget(noteName) {
+  const selectedTuning = tunings[elements.tuningSelect.value];
+  if (!selectedTuning.notes.some((note) => note.name === noteName)) {
+    return;
+  }
+
+  state.manualTargetName = noteName;
+  updateTargetModeUi();
+  resetReadout();
+}
+
+function enableAutomaticTarget() {
+  if (state.manualTargetName === null) {
+    return;
+  }
+
+  state.manualTargetName = null;
+  updateTargetModeUi();
+  resetReadout();
+}
+
+function updateTargetModeUi() {
+  const selectedTuning = tunings[elements.tuningSelect.value];
+  const hasPresetStrings = selectedTuning.notes.length > 0;
+  const isAutomatic = state.manualTargetName === null;
+  const selectedName = state.manualTargetName
+    ? formatNoteName(state.manualTargetName)
+    : null;
+
+  elements.autoModeButton.hidden = !hasPresetStrings;
+  elements.autoModeButton.classList.toggle("is-active", hasPresetStrings && isAutomatic);
+  elements.autoModeButton.setAttribute("aria-pressed", String(hasPresetStrings && isAutomatic));
+  elements.readoutLabel.textContent = isAutomatic ? "Nota rilevata" : "Corda selezionata";
+  elements.targetHint.textContent = !hasPresetStrings
+    ? "Riconoscimento cromatico di tutte le note"
+    : isAutomatic
+      ? "Auto: tocca una corda per bloccarla"
+      : `${selectedName} bloccata · toccala ancora per Auto`;
+
+  elements.stringList.querySelectorAll(".string-pill").forEach((pill) => {
+    const isSelected = pill.dataset.note === state.manualTargetName;
+    const noteLabel = formatNoteName(pill.dataset.note || "");
+    pill.classList.toggle("is-selected", isSelected);
+    pill.setAttribute("aria-pressed", String(isSelected));
+    pill.setAttribute(
+      "aria-label",
+      isSelected
+        ? `${noteLabel} selezionata. Tocca di nuovo per tornare alla modalità automatica`
+        : `Seleziona la corda ${noteLabel}`,
+    );
+    pill.setAttribute("title", isSelected ? `${noteLabel}: torna ad Auto` : `Accorda ${noteLabel}`);
   });
 }
 
@@ -804,7 +906,7 @@ function resizeGraphCanvas() {
   const rect = elements.intonationCanvas.getBoundingClientRect();
   const width = Math.max(320, Math.round(rect.width));
   const height = Math.max(240, Math.round(rect.height));
-  graph.pixelRatio = window.devicePixelRatio || 1;
+  graph.pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
   elements.intonationCanvas.width = Math.round(width * graph.pixelRatio);
   elements.intonationCanvas.height = Math.round(height * graph.pixelRatio);
   graph.context.setTransform(graph.pixelRatio, 0, 0, graph.pixelRatio, 0, 0);
@@ -839,6 +941,44 @@ function drawGraph() {
   drawGridLines(context, padding, graphWidth, graphHeight, colors);
   drawCursorGuide(context, padding, graphWidth, graphHeight, colors);
   drawHistoryLine(context, padding, graphWidth, graphHeight, colors);
+  drawCue(context, padding, graphWidth, graphHeight, width, height, colors);
+}
+
+function drawCue(context, padding, graphWidth, graphHeight, width, height, colors) {
+  const cents = state.cueCents ?? 0;
+  const x = centsToX(cents, padding, graphWidth);
+  const radius = height < 350 ? 24 : width < 500 ? 30 : 32;
+  const centerY = padding + radius;
+  const cursorY = getCursorY(padding, graphHeight);
+
+  context.setLineDash([]);
+  context.beginPath();
+  context.lineWidth = 4;
+  context.strokeStyle = colors.ink;
+  context.moveTo(x, centerY + radius);
+  context.lineTo(x, Math.max(cursorY, centerY + radius));
+  context.stroke();
+
+  if (state.cueLive) {
+    context.beginPath();
+    context.fillStyle = colors.pink;
+    context.arc(x, centerY, radius + 5, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.beginPath();
+  context.lineWidth = 4;
+  context.strokeStyle = colors.ink;
+  context.fillStyle = state.cueLive ? colors.green : colors.paper;
+  context.arc(x, centerY, radius, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+
+  context.fillStyle = colors.ink;
+  context.font = `900 ${radius < 30 ? 12 : 14}px system-ui, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(state.cueLive ? formatCueCents(cents) : "—", x, centerY + 1);
 }
 
 function drawTunedBand(context, padding, graphWidth, graphHeight, colors) {
@@ -940,17 +1080,6 @@ function centsToX(cents, padding, graphWidth) {
 
 function updateCuePosition(cents) {
   state.cueCents = Number.isFinite(cents) ? clamp(cents, -50, 50) : null;
-
-  const canvasWidth = elements.intonationCanvas.getBoundingClientRect().width;
-  if (!canvasWidth) {
-    elements.noteCue.style.left = "50%";
-    return;
-  }
-
-  const ratio = state.cueCents === null ? 0.5 : (state.cueCents + 50) / 100;
-  const graphWidth = Math.max(canvasWidth - graphConfig.padding * 2, 0);
-  const x = graphConfig.padding + ratio * graphWidth;
-  elements.noteCue.style.left = `${x}px`;
 }
 
 function getCursorY(padding, graphHeight) {
@@ -959,10 +1088,10 @@ function getCursorY(padding, graphHeight) {
 
 function formatCueCents(cents) {
   if (!Number.isFinite(cents) || Math.abs(cents) <= 1) {
-    return "0";
+    return "0¢";
   }
 
-  return `${cents > 0 ? "+" : ""}${Math.round(cents)}`;
+  return `${cents > 0 ? "+" : ""}${Math.round(cents)}¢`;
 }
 
 function getCanvasColors() {
@@ -971,7 +1100,8 @@ function getCanvasColors() {
     amber: styles.getPropertyValue("--amber").trim() || "#ffb800",
     coral: styles.getPropertyValue("--coral").trim() || "#ff5a4f",
     green: styles.getPropertyValue("--green").trim() || "#2ee66b",
-    greenSoft: "rgba(46, 230, 107, 0.22)",
+    greenSoft:
+      styles.getPropertyValue("--green-soft").trim() || "rgba(46, 230, 107, 0.22)",
     grid: styles.getPropertyValue("--grid").trim() || "rgba(17, 17, 17, 0.22)",
     ink: styles.getPropertyValue("--ink").trim() || "#111111",
     paper: styles.getPropertyValue("--panel").trim() || "#ffffff",
@@ -979,10 +1109,19 @@ function getCanvasColors() {
   };
 }
 
-function restoreTheme() {
-  const savedTheme = readSavedTheme();
-  elements.skinSelect.value = ["brutal", "neon", "pixel"].includes(savedTheme) ? savedTheme : "brutal";
-  applyTheme(elements.skinSelect.value);
+function restorePreferences() {
+  const savedTheme = readPreference("accordatore-theme", "brutal");
+  const savedTuning = readPreference("accordatore-tuning", "guitar");
+  const savedReference = Number(readPreference("accordatore-reference", "440"));
+
+  elements.skinSelect.value = ["brutal", "neon", "pixel"].includes(savedTheme)
+    ? savedTheme
+    : "brutal";
+  elements.tuningSelect.value = Object.hasOwn(tunings, savedTuning) ? savedTuning : "guitar";
+  elements.referencePitch.value =
+    Number.isFinite(savedReference) && savedReference >= 400 && savedReference <= 480
+      ? String(savedReference)
+      : "440";
 }
 
 function applyTheme(theme) {
@@ -998,35 +1137,40 @@ function applyTheme(theme) {
   drawGraph();
 }
 
-function readSavedTheme() {
+function saveTheme(theme) {
+  savePreference("accordatore-theme", theme);
+}
+
+function readPreference(key, fallback) {
   try {
-    return localStorage.getItem("accordatore-theme") || "brutal";
+    return localStorage.getItem(key) || fallback;
   } catch (error) {
-    return "brutal";
+    return fallback;
   }
 }
 
-function saveTheme(theme) {
+function savePreference(key, value) {
   try {
-    localStorage.setItem("accordatore-theme", theme);
+    localStorage.setItem(key, value);
   } catch (error) {
-    // Theme changes can still work for the current session.
+    // Preferences remain available for the current session.
   }
 }
 
 function updateSignalMeter(rms) {
   const level = clamp((rms / analysisConfig.signalMeterFullScale) * 100, 0, 100);
   elements.signalFill.style.width = `${level}%`;
+  elements.signalMeter.setAttribute("aria-valuenow", String(Math.round(level)));
 }
 
-function highlightDetectedString(noteName) {
+function highlightDetectedString(noteName, isWithinRange = true) {
   const noteBase = getNoteBase(noteName);
   const pills = elements.stringList.querySelectorAll(".string-pill");
   const hasExactMatch = Array.from(pills).some((pill) => pill.dataset.note === noteName);
 
   pills.forEach((pill) => {
     const matches = hasExactMatch ? pill.dataset.note === noteName : getNoteBase(pill.dataset.note || "") === noteBase;
-    pill.classList.toggle("is-detected", matches);
+    pill.classList.toggle("is-detected", matches && isWithinRange);
   });
 }
 
@@ -1054,12 +1198,14 @@ function formatNoteName(noteName, includeOctave = true) {
 function showPendingReadout(target = null, frequency = null) {
   if (target) {
     elements.noteName.textContent = formatNoteName(target.name);
-    elements.noteCue.textContent = "--";
+    elements.noteName.classList.remove("is-placeholder");
+    elements.noteCue.textContent = "—";
     elements.noteCue.classList.remove("is-live");
+    state.cueLive = false;
     updateCuePosition(null);
     elements.frequencyValue.textContent = Number.isFinite(frequency)
       ? `${frequency.toFixed(1)} Hz`
-      : "-- Hz";
+      : "— Hz";
     setGuidance(
       state.hasReading ? "Verifico cambio nota" : "Verifico la nota",
       "pending",
@@ -1068,11 +1214,13 @@ function showPendingReadout(target = null, frequency = null) {
     return;
   }
 
-  elements.noteName.textContent = "--";
-  elements.noteCue.textContent = "--";
+  elements.noteName.textContent = "—";
+  elements.noteName.classList.add("is-placeholder");
+  elements.noteCue.textContent = "—";
   elements.noteCue.classList.remove("is-live");
+  state.cueLive = false;
   updateCuePosition(null);
-  elements.frequencyValue.textContent = "-- Hz";
+  elements.frequencyValue.textContent = "— Hz";
   setGuidance("Verifico la nota", "pending");
   clearDetectedString();
 }
@@ -1101,16 +1249,21 @@ function holdLastReadout(timestamp, rms) {
     return;
   }
 
-  setGuidance("Ultima nota", "idle");
-  clearDetectedString();
+  state.hasReading = false;
+  state.smoothedCents = null;
+  state.smoothedFrequency = null;
+  state.confirmedTarget = null;
+  showIdleReadout(rms < analysisConfig.minRms ? "Suona una corda" : "Cerco la nota");
 }
 
 function showIdleReadout(message) {
-  elements.noteName.textContent = "--";
-  elements.noteCue.textContent = "--";
+  elements.noteName.textContent = "—";
+  elements.noteName.classList.add("is-placeholder");
+  elements.noteCue.textContent = "—";
   elements.noteCue.classList.remove("is-live");
+  state.cueLive = false;
   updateCuePosition(null);
-  elements.frequencyValue.textContent = "-- Hz";
+  elements.frequencyValue.textContent = "— Hz";
   setGuidance(message, "idle");
   clearDetectedString();
 }
@@ -1124,12 +1277,14 @@ function resetReadout() {
   state.pendingTargetSince = 0;
   state.confirmedTarget = null;
   state.cueCents = null;
+  state.cueLive = false;
   state.lastDetectedRms = null;
   state.lastPitchJumpCents = 0;
   state.pitchHistory = [];
   state.graphHistory = [];
   state.hasReading = false;
   elements.signalFill.style.width = "0%";
+  elements.signalMeter.setAttribute("aria-valuenow", "0");
   showIdleReadout("In attesa di segnale");
   drawGraph();
 }
@@ -1181,10 +1336,23 @@ function releaseMicrophone() {
 }
 
 function setMicrophoneButtonState(isListening) {
-  const label = isListening ? "Ferma microfono" : "Avvia microfono";
+  const label = isListening ? "Metti in pausa il microfono" : "Avvia microfono";
   elements.startButton.classList.toggle("is-listening", isListening);
+  elements.startButton.setAttribute("aria-pressed", String(isListening));
   elements.startButton.setAttribute("aria-label", label);
   elements.startButton.setAttribute("title", label);
+  elements.micButtonLabel.textContent = isListening ? "Pausa" : "Avvia";
+}
+
+function setMicrophoneLoadingState(isLoading) {
+  elements.startButton.disabled = isLoading;
+  elements.startButton.classList.toggle("is-loading", isLoading);
+  elements.startButton.setAttribute("aria-busy", String(isLoading));
+  if (isLoading) {
+    elements.micButtonLabel.textContent = "Attendi";
+  } else {
+    setMicrophoneButtonState(state.listening);
+  }
 }
 
 function setStatus(message, type) {
@@ -1211,8 +1379,10 @@ function registerServiceWorker() {
   }
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {
-      // Standalone mode still works without offline caching.
-    });
+    navigator.serviceWorker
+      .register("./sw.js?v=36", { updateViaCache: "none" })
+      .catch(() => {
+        // Standalone mode still works without offline caching.
+      });
   });
 }

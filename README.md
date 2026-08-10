@@ -43,5 +43,8 @@ Su iPhone il microfono funziona correttamente solo da un contesto sicuro, quindi
 - Grafico verticale dell'intonazione nel tempo, con pause vuote quando non c'è segnale.
 - Valore dei centesimi vicino al punto rilevato.
 - Paletta centrale sovrapposta al grafico, con note in italiano e corda evidenziata dopo una breve conferma del rilevamento.
+- Selezione automatica della corda oppure blocco manuale toccando una meccanica sulla paletta.
+- Risposta adattiva: rapida durante le correzioni ampie e piu stabile vicino all'accordatura.
+- Letture non piu valide rimosse automaticamente dopo una breve pausa del segnale.
 - Skin UI selezionabile: Brutal, Neon o Pixel.
 - Calibrazione del La centrale tra 400 e 480 Hz.

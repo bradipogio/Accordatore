@@ -8,11 +8,13 @@ const appSource = fs.readFileSync(path.join(rootDir, "app.js"), "utf8");
 
 function makeElement() {
   const classes = new Set();
+  const attributes = new Map();
 
   return {
     value: "",
     textContent: "",
     innerHTML: "",
+    hidden: false,
     dataset: {},
     style: {
       setProperty() {},
@@ -24,6 +26,9 @@ function makeElement() {
       remove(name) {
         classes.delete(name);
       },
+      contains(name) {
+        return classes.has(name);
+      },
       toggle(name, force) {
         if (force) {
           classes.add(name);
@@ -34,7 +39,12 @@ function makeElement() {
     },
     append() {},
     addEventListener() {},
-    setAttribute() {},
+    setAttribute(name, value) {
+      attributes.set(name, String(value));
+    },
+    getAttribute(name) {
+      return attributes.get(name) ?? null;
+    },
     querySelectorAll() {
       return [];
     },
@@ -46,6 +56,8 @@ function makeElement() {
         setTransform() {},
         clearRect() {},
         fillRect() {},
+        fill() {},
+        arc() {},
         beginPath() {},
         moveTo() {},
         lineTo() {},
@@ -67,6 +79,7 @@ function createHarness() {
     "#statusDot": makeElement(),
     "#statusText": makeElement(),
     "#signalFill": makeElement(),
+    "#signalMeter": makeElement(),
     "#signalText": makeElement(),
     "#intonationCanvas": makeElement(),
     ".headstock-stage": makeElement(),
@@ -74,6 +87,10 @@ function createHarness() {
     "#noteCue": makeElement(),
     "#frequencyValue": makeElement(),
     "#stringList": makeElement(),
+    "#micButtonLabel": makeElement(),
+    "#autoModeButton": makeElement(),
+    "#targetHint": makeElement(),
+    "#readoutLabel": makeElement(),
   };
 
   nodes["#tuningSelect"].value = "guitar";
@@ -132,20 +149,32 @@ function createHarness() {
   return { context, nodes };
 }
 
-function generateSine(frequency, sampleRate = 44100, size = 8192) {
+function generateSine(
+  frequency,
+  sampleRate = 44100,
+  size = 8192,
+  amplitude = 0.35,
+  noiseAmplitude = 0.004,
+) {
   const buffer = new Float32Array(size);
   let seed = 12345;
 
   for (let index = 0; index < size; index += 1) {
     seed = (seed * 16807) % 2147483647;
-    const noise = ((seed / 2147483647) * 2 - 1) * 0.004;
-    buffer[index] = Math.sin((2 * Math.PI * frequency * index) / sampleRate) * 0.35 + noise;
+    const noise = ((seed / 2147483647) * 2 - 1) * noiseAmplitude;
+    buffer[index] = Math.sin((2 * Math.PI * frequency * index) / sampleRate) * amplitude + noise;
   }
 
   return buffer;
 }
 
-function generateHarmonicString(frequency, sampleRate = 44100, size = 8192) {
+function generateHarmonicString(
+  frequency,
+  sampleRate = 44100,
+  size = 8192,
+  level = 1,
+  noiseAmplitude = 0.006,
+) {
   const buffer = new Float32Array(size);
   const partials = [
     { multiple: 1, amplitude: 0.16 },
@@ -160,7 +189,7 @@ function generateHarmonicString(frequency, sampleRate = 44100, size = 8192) {
     seed = (seed * 16807) % 2147483647;
     const time = index / sampleRate;
     const envelope = Math.exp(-time * 2.8);
-    const noise = ((seed / 2147483647) * 2 - 1) * 0.006;
+    const noise = ((seed / 2147483647) * 2 - 1) * noiseAmplitude;
     buffer[index] =
       partials.reduce(
         (sum, partial) =>
@@ -169,7 +198,8 @@ function generateHarmonicString(frequency, sampleRate = 44100, size = 8192) {
             Math.sin((2 * Math.PI * frequency * partial.multiple * index) / sampleRate),
         0,
       ) *
-        envelope +
+        envelope *
+        level +
       noise;
   }
 
@@ -188,8 +218,18 @@ function generateNoise(sampleRate = 44100, size = 8192) {
   return buffer;
 }
 
-function expectPitch(context, frequency, range, tolerance = 0.8) {
-  const result = context.autoCorrelate(generateSine(frequency), 44100, range);
+function expectPitch(context, frequency, range, tolerance = 0.8, options = {}) {
+  const {
+    sampleRate = 44100,
+    size = 8192,
+    amplitude = 0.35,
+    noiseAmplitude = 0.004,
+  } = options;
+  const result = context.autoCorrelate(
+    generateSine(frequency, sampleRate, size, amplitude, noiseAmplitude),
+    sampleRate,
+    range,
+  );
   assert.ok(result.frequency, `Expected ${frequency} Hz to be detected`);
   assert.ok(
     Math.abs(result.frequency - frequency) <= tolerance,
@@ -197,12 +237,38 @@ function expectPitch(context, frequency, range, tolerance = 0.8) {
   );
 }
 
-function expectStringPitch(context, frequency, range, tolerance = 0.9) {
-  const result = context.autoCorrelate(generateHarmonicString(frequency), 44100, range);
+function expectStringPitch(context, frequency, range, tolerance = 0.9, options = {}) {
+  const {
+    sampleRate = 44100,
+    size = 8192,
+    level = 1,
+    noiseAmplitude = 0.006,
+  } = options;
+  const result = context.autoCorrelate(
+    generateHarmonicString(frequency, sampleRate, size, level, noiseAmplitude),
+    sampleRate,
+    range,
+  );
   assert.ok(result.frequency, `Expected string-like ${frequency} Hz to be detected`);
   assert.ok(
     Math.abs(result.frequency - frequency) <= tolerance,
     `Expected string-like ${frequency} Hz, got ${result.frequency}`,
+  );
+}
+
+function expectCents(context, targetFrequency, cents, range, options = {}) {
+  const inputFrequency = targetFrequency * 2 ** (cents / 1200);
+  const { sampleRate = 48000, size = 4096 } = options;
+  const result = context.autoCorrelate(
+    generateSine(inputFrequency, sampleRate, size),
+    sampleRate,
+    range,
+  );
+  assert.ok(result.frequency, `Expected ${cents} cents from ${targetFrequency} Hz to be detected`);
+  const detectedCents = 1200 * Math.log2(result.frequency / targetFrequency);
+  assert.ok(
+    Math.abs(detectedCents - cents) <= 1.5,
+    `Expected ${cents} cents, got ${detectedCents.toFixed(2)} cents`,
   );
 }
 
@@ -218,6 +284,16 @@ assert.equal(
     .frequency,
   null,
 );
+assert.equal(
+  context.autoCorrelate(generateNoise(48000, 4096), 48000, {
+    minFrequency: 55,
+    maxFrequency: 420,
+  }).frequency,
+  null,
+);
+
+assert.equal(context.getCentsSmoothing(20, 0), 0.62);
+assert.equal(context.getCentsSmoothing(4, 0), 0.32);
 
 expectPitch(context, 35, { minFrequency: 30, maxFrequency: 150 }, 0.5);
 expectPitch(context, 41.2, { minFrequency: 35, maxFrequency: 135 }, 0.5);
@@ -228,6 +304,35 @@ expectStringPitch(context, 41.2, { minFrequency: 30, maxFrequency: 150 }, 0.7);
 expectStringPitch(context, 82.41, { minFrequency: 55, maxFrequency: 420 }, 0.7);
 expectStringPitch(context, 110, { minFrequency: 55, maxFrequency: 420 }, 0.7);
 expectStringPitch(context, 196, { minFrequency: 55, maxFrequency: 420 }, 0.8);
+expectStringPitch(context, 41.2, { minFrequency: 30, maxFrequency: 150 }, 0.8, {
+  size: 4096,
+});
+expectStringPitch(context, 82.41, { minFrequency: 55, maxFrequency: 420 }, 0.8, {
+  size: 4096,
+});
+expectStringPitch(context, 41.2, { minFrequency: 30, maxFrequency: 150 }, 0.9, {
+  sampleRate: 48000,
+  size: 4096,
+});
+expectStringPitch(context, 82.41, { minFrequency: 55, maxFrequency: 420 }, 0.9, {
+  sampleRate: 48000,
+  size: 4096,
+});
+expectStringPitch(context, 110, { minFrequency: 55, maxFrequency: 420 }, 1, {
+  sampleRate: 48000,
+  size: 4096,
+  level: 0.08,
+  noiseAmplitude: 0.0008,
+});
+expectPitch(context, 440, { minFrequency: 220, maxFrequency: 520 }, 1, {
+  sampleRate: 48000,
+  size: 4096,
+  amplitude: 0.015,
+  noiseAmplitude: 0.0006,
+});
+expectCents(context, 82.41, -25, { minFrequency: 55, maxFrequency: 420 });
+expectCents(context, 82.41, 17, { minFrequency: 55, maxFrequency: 420 });
+expectCents(context, 110, 4, { minFrequency: 55, maxFrequency: 420 });
 
 nodes["#tuningSelect"].value = "bass";
 assert.equal(context.findTargetNote(41.2, 440).name, "E1");
@@ -235,6 +340,14 @@ assert.equal(context.findTargetNote(41.2, 440).name, "E1");
 nodes["#tuningSelect"].value = "guitar";
 assert.equal(context.findTargetNote(82.41, 440).name, "E2");
 assert.equal(context.findTargetNote(110, 440).name, "A2");
+
+context.selectManualTarget("A2");
+assert.equal(context.findTargetNote(82.41, 440).name, "A2");
+assert.equal(nodes["#autoModeButton"].getAttribute("aria-pressed"), "false");
+assert.equal(nodes["#readoutLabel"].textContent, "Corda selezionata");
+context.enableAutomaticTarget();
+assert.equal(context.findTargetNote(82.41, 440).name, "E2");
+assert.equal(nodes["#autoModeButton"].getAttribute("aria-pressed"), "true");
 
 nodes["#tuningSelect"].value = "chromatic";
 assert.equal(context.findTargetNote(440, 440).name, "A4");
@@ -248,5 +361,26 @@ detectFrame(context, 110, 370, 0.07);
 assert.equal(nodes["#noteName"].textContent, "La2");
 detectFrame(context, 110, 650, 0.07);
 assert.equal(nodes["#noteName"].textContent, "La2");
+
+context.refreshPresetUi();
+assert.equal(nodes["#noteName"].textContent, "—");
+assert.equal(nodes["#signalText"].textContent, "In attesa di segnale");
+
+nodes["#tuningSelect"].value = "chromatic";
+context.refreshPresetUi(true);
+detectFrame(context, 430, 0, 0.12);
+detectFrame(context, 430, 200, 0.12);
+assert.equal(nodes["#noteName"].textContent, "La4");
+assert.equal(nodes["#signalText"].textContent, "Nota troppo bassa");
+
+context.holdLastReadout(1401, 0);
+assert.equal(nodes["#noteName"].textContent, "—");
+assert.equal(nodes["#signalText"].textContent, "Suona una corda");
+
+context.refreshPresetUi(true);
+detectFrame(context, 450, 0, 0.12);
+detectFrame(context, 450, 200, 0.12);
+assert.equal(nodes["#noteName"].textContent, "La4");
+assert.equal(nodes["#signalText"].textContent, "Nota troppo alta");
 
 console.log("audio-engine: ok");
